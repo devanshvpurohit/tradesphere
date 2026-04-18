@@ -9,7 +9,7 @@ type SessionStatus = "loading" | "authenticated" | "unauthenticated";
 interface AuthContextType {
   user: User | null;
   status: SessionStatus;
-  signOut: () => Promise<void>;
+  signOut: (options?: { callbackUrl?: string }) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -35,8 +35,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => subscription.unsubscribe();
   }, []);
 
-  const signOut = async () => {
+  const signOut = async (options?: { callbackUrl?: string }) => {
     await supabase.auth.signOut();
+    window.location.href = options?.callbackUrl || "/auth/signin";
   };
 
   return (
@@ -57,9 +58,9 @@ export function useSession() {
   };
 }
 
-export function signOut() {
+export function signOut(options?: { callbackUrl?: string }) {
   const supabase = createClient();
   return supabase.auth.signOut().then(() => {
-    window.location.href = "/auth/signin";
+    window.location.href = options?.callbackUrl || "/auth/signin";
   });
 }
