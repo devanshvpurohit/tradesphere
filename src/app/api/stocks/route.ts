@@ -1,12 +1,18 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { marketService } from '@/services/marketService';
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const popularSymbols = marketService.getPopularStocks();
+    const { searchParams } = new URL(request.url);
+    const market = searchParams.get('market');
+    
+    // Determine which stocks to fetch based on market parameter
+    const symbols = market === 'indian' 
+      ? marketService.getTopIndianStocks()
+      : marketService.getPopularStocks();
     
     // Use the new batch fetch method with fallback
-    const stocks = await marketService.getStocks(popularSymbols);
+    const stocks = await marketService.getStocks(symbols);
 
     // Filter out stocks with zero price (failed fetches)
     const validStocks = stocks.filter(stock => stock.price > 0);

@@ -111,33 +111,64 @@ export default function StockDetail() {
         timeScale: {
           timeVisible: true,
           secondsVisible: false,
+          borderColor: '#e5e7eb',
+        },
+        rightPriceScale: {
+          borderColor: '#e5e7eb',
         },
       });
 
-      // Prepare chart data
+      // Prepare and validate chart data with proper time handling
       const chartData = timeSeriesData
         .map((item: any) => {
-          const date = new Date(item.date);
+          // Handle both Date objects and timestamp strings
+          let timestamp: number;
+          if (item.date instanceof Date) {
+            timestamp = Math.floor(item.date.getTime() / 1000);
+          } else if (typeof item.date === 'string') {
+            timestamp = Math.floor(new Date(item.date).getTime() / 1000);
+          } else if (typeof item.date === 'number') {
+            // Already a timestamp
+            timestamp = item.date > 10000000000 ? Math.floor(item.date / 1000) : item.date;
+          } else {
+            return null;
+          }
+
+          // Convert to YYYY-MM-DD format for daily data
+          const date = new Date(timestamp * 1000);
+          const timeString = date.toISOString().split('T')[0];
+
           return {
-            time: date.toISOString().split('T')[0],
+            time: timeString,
             open: parseFloat(item.open) || 0,
             high: parseFloat(item.high) || 0,
             low: parseFloat(item.low) || 0,
             close: parseFloat(item.close) || 0,
           };
         })
-        .filter((item: any) => 
-          item.close > 0 && 
-          item.open > 0 && 
-          item.high > 0 && 
-          item.low > 0 &&
-          !isNaN(item.close) &&
-          item.time
-        )
+        .filter((item: any) => {
+          // Validate data quality
+          if (!item) return false;
+          if (!item.time) return false;
+          if (item.close <= 0 || item.open <= 0 || item.high <= 0 || item.low <= 0) return false;
+          if (isNaN(item.close) || isNaN(item.open) || isNaN(item.high) || isNaN(item.low)) return false;
+          // Validate OHLC logic
+          if (item.high < item.low) return false;
+          if (item.high < item.open || item.high < item.close) return false;
+          if (item.low > item.open || item.low > item.close) return false;
+          return true;
+        })
         .sort((a: any, b: any) => a.time.localeCompare(b.time));
 
+      console.log('Processed chart data:', {
+        originalLength: timeSeriesData.length,
+        processedLength: chartData.length,
+        firstPoint: chartData[0],
+        lastPoint: chartData[chartData.length - 1],
+      });
+
       if (chartData.length === 0) {
-        setChartError('No historical data available');
+        setChartError('No valid historical data available');
         return;
       }
 
@@ -153,6 +184,8 @@ export default function StockDetail() {
 
         candlestickSeries.setData(chartData);
         chart.timeScale().fitContent();
+        
+        console.log('Candlestick chart rendered successfully');
       } catch (candleError) {
         // Fallback to line chart if candlestick fails
         console.warn('Candlestick failed, using line chart:', candleError);
@@ -382,6 +415,7 @@ export default function StockDetail() {
               ) : (
                 <div ref={chartContainerRef} className="min-h-[400px]" />
               )}
+            </div>
 
             {/* Quick Trade Panel */}
             <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200">

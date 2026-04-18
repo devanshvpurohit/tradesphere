@@ -306,6 +306,29 @@ class MarketService {
   }
 
   /**
+   * Get top Indian stocks (NSE)
+   */
+  getTopIndianStocks(): string[] {
+    return [
+      'RELIANCE.NS',   // Reliance Industries
+      'TCS.NS',        // Tata Consultancy Services
+      'HDFCBANK.NS',   // HDFC Bank
+      'INFY.NS',       // Infosys
+      'HINDUNILVR.NS', // Hindustan Unilever
+      'ICICIBANK.NS',  // ICICI Bank
+      'SBIN.NS',       // State Bank of India
+      'BHARTIARTL.NS', // Bharti Airtel
+      'ITC.NS',        // ITC Limited
+      'KOTAKBANK.NS',  // Kotak Mahindra Bank
+      'LT.NS',         // Larsen & Toubro
+      'AXISBANK.NS',   // Axis Bank
+      'WIPRO.NS',      // Wipro
+      'MARUTI.NS',     // Maruti Suzuki
+      'TITAN.NS',      // Titan Company
+    ];
+  }
+
+  /**
    * Convert period string to seconds
    */
   private getPeriodSeconds(period: string): number {
