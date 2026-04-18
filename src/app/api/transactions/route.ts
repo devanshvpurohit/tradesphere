@@ -1,11 +1,13 @@
 import { NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/lib/auth';
+import { createClient } from '@/lib/supabase/server';
+
 import { tradingService } from '@/services/tradingService';
 
 export async function GET(request: Request) {
   try {
-    const session = await getServerSession(authOptions);
+    const supabase = createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    const session = user ? { user } : null;
 
     if (!session?.user?.id) {
       return NextResponse.json(

@@ -1,9 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import { signIn } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { createClient } from '@/lib/supabase/client';
 
 export default function SignIn() {
   const router = useRouter();
@@ -18,14 +18,14 @@ export default function SignIn() {
     setLoading(true);
 
     try {
-      const result = await signIn('credentials', {
+      const supabase = createClient();
+      const { error } = await supabase.auth.signInWithPassword({
         email,
         password,
-        redirect: false,
       });
 
-      if (result?.error) {
-        setError('Invalid email or password');
+      if (error) {
+        setError(error.message);
       } else {
         router.push('/dashboard');
       }
@@ -146,6 +146,10 @@ export default function SignIn() {
           {/* Social Login */}
           <div className="space-y-3">
             <button
+              onClick={() => {
+                const supabase = createClient();
+                supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: window.location.origin + '/dashboard' } });
+              }}
               className="w-full flex items-center justify-center gap-3 py-3.5 px-4 bg-white rounded-full border border-gray-200 hover:bg-gray-50 transition-colors text-gray-900 font-medium text-sm"
               type="button"
             >

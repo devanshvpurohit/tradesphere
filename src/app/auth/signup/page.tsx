@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { createClient } from '@/lib/supabase/client';
 
 export default function SignUp() {
   const router = useRouter();
@@ -29,18 +30,16 @@ export default function SignUp() {
     setLoading(true);
 
     try {
-      const response = await fetch('/api/auth/signup', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
+      const supabase = createClient();
+      const { error: supaError } = await supabase.auth.signUp({
+        email,
+        password,
       });
 
-      const data = await response.json();
-
-      if (response.ok) {
-        router.push('/auth/signin?registered=true');
+      if (supaError) {
+        setError(supaError.message);
       } else {
-        setError(data.error || 'Failed to create account');
+        router.push('/auth/signin?registered=true');
       }
     } catch (err) {
       setError('An error occurred. Please try again.');
@@ -178,6 +177,10 @@ export default function SignUp() {
           {/* Social Login */}
           <div className="space-y-3">
             <button
+              onClick={() => {
+                const supabase = createClient();
+                supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: window.location.origin + '/dashboard' } });
+              }}
               className="w-full flex items-center justify-center gap-3 py-3.5 px-4 bg-white rounded-full border border-gray-200 hover:bg-gray-50 transition-colors text-gray-900 font-medium text-sm"
               type="button"
             >

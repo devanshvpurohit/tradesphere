@@ -28,7 +28,4 @@ CREATE INDEX IF NOT EXISTS "Order_userId_idx" ON "Order"("userId");
 CREATE INDEX IF NOT EXISTS "Order_status_idx" ON "Order"("status");
 CREATE INDEX IF NOT EXISTS "Order_createdAt_idx" ON "Order"("createdAt");
 
--- Create trigger for Order updatedAt
-DROP TRIGGER IF EXISTS update_order_updated_at ON "Order";
-CREATE TRIGGER update_order_updated_at BEFORE UPDATE ON "Order"
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+

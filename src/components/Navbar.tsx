@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useSession, signOut } from 'next-auth/react';
+import { useSession, signOut } from '@/components/AuthContext';
 import { usePathname } from 'next/navigation';
 
 export default function Navbar() {
