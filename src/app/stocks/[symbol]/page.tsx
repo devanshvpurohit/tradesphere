@@ -42,6 +42,9 @@ export default function StockDetail() {
       setQuote(data.quote);
 
       if (chartContainerRef.current && data.timeSeries && data.timeSeries.length > 0) {
+        // Clear any existing chart
+        chartContainerRef.current.innerHTML = '';
+        
         const chart = createChart(chartContainerRef.current, {
           layout: {
             background: { type: ColorType.Solid, color: '#ffffff' },
@@ -53,25 +56,50 @@ export default function StockDetail() {
           },
           width: chartContainerRef.current.clientWidth,
           height: 400,
+          timeScale: {
+            timeVisible: true,
+            secondsVisible: false,
+          },
         });
 
-        const lineSeries = chart.addLineSeries({
-          color: '#2563eb',
-          lineWidth: 2,
+        // Create candlestick series for better visualization
+        const candlestickSeries = chart.addCandlestickSeries({
+          upColor: '#10b981',
+          downColor: '#ef4444',
+          borderVisible: false,
+          wickUpColor: '#10b981',
+          wickDownColor: '#ef4444',
         });
 
         const chartData = data.timeSeries
           .map((item: any) => ({
             time: new Date(item.date).toISOString().split('T')[0],
-            value: item.close,
+            open: item.open,
+            high: item.high,
+            low: item.low,
+            close: item.close,
           }))
-          .filter((item: any) => item.value > 0);
+          .filter((item: any) => item.close > 0)
+          .sort((a: any, b: any) => a.time.localeCompare(b.time));
 
-        lineSeries.setData(chartData);
+        if (chartData.length > 0) {
+          candlestickSeries.setData(chartData);
+          chart.timeScale().fitContent();
+        }
 
-        chart.timeScale().fitContent();
+        // Handle window resize
+        const handleResize = () => {
+          if (chartContainerRef.current) {
+            chart.applyOptions({
+              width: chartContainerRef.current.clientWidth,
+            });
+          }
+        };
+
+        window.addEventListener('resize', handleResize);
 
         return () => {
+          window.removeEventListener('resize', handleResize);
           chart.remove();
         };
       }

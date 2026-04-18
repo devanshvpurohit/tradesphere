@@ -7,10 +7,11 @@ import Link from 'next/link';
 
 interface Stock {
   symbol: string;
-  name: string;
+  name?: string;
   price: number;
   change: number;
   changePercent: number;
+  source?: 'primary' | 'finnhub';
 }
 
 export default function Stocks() {
@@ -168,7 +169,12 @@ export default function Stocks() {
                           </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
-                          {stock.name || 'N/A'}
+                          {stock.name || stock.symbol}
+                          {stock.source && (
+                            <span className="ml-2 text-xs text-gray-400">
+                              ({stock.source === 'primary' ? 'NSE' : 'Global'})
+                            </span>
+                          )}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-right font-medium text-gray-900">
                           {stock.price ? `₹${stock.price.toFixed(2)}` : 'N/A'}
