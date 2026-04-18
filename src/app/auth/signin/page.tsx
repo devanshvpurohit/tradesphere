@@ -48,10 +48,10 @@ export default function SignIn() {
           {/* Logo Section */}
           <div className="flex flex-col items-center mb-10">
             <div className="mb-4">
-              <span className="text-xl font-black tracking-tighter text-gray-900">TradeSphere</span>
+              <span className="text-xl font-black tracking-tighter text-black">TradeSphere</span>
             </div>
-            <h1 className="text-gray-900 text-2xl font-bold tracking-tight mb-2">Welcome Back</h1>
-            <p className="text-gray-600 text-sm text-center">
+            <h1 className="text-black text-2xl font-bold tracking-tight mb-2">Welcome Back</h1>
+            <p className="text-black text-sm text-center">
               Institutional grade security for your Indian stock trading portfolio.
             </p>
           </div>
@@ -67,7 +67,7 @@ export default function SignIn() {
           <form onSubmit={handleSubmit} className="space-y-6">
             {/* Email Field */}
             <div className="space-y-2">
-              <label className="block text-xs font-medium uppercase tracking-[0.05em] text-gray-600 ml-1" htmlFor="email">
+              <label className="block text-xs font-semibold uppercase tracking-[0.05em] text-black ml-1" htmlFor="email">
                 Email Address
               </label>
               <div className="relative group">
@@ -92,10 +92,10 @@ export default function SignIn() {
             {/* Password Field */}
             <div className="space-y-2">
               <div className="flex justify-between items-center px-1">
-                <label className="block text-xs font-medium uppercase tracking-[0.05em] text-gray-600" htmlFor="password">
+                <label className="block text-xs font-semibold uppercase tracking-[0.05em] text-black" htmlFor="password">
                   Password
                 </label>
-                <Link href="#" className="text-[10px] uppercase tracking-wider font-bold text-gray-700 hover:text-blue-600 transition-colors">
+                <Link href="#" className="text-[10px] uppercase tracking-wider font-bold text-black hover:text-blue-600 transition-colors">
                   Forgot Password?
                 </Link>
               </div>
@@ -106,7 +106,7 @@ export default function SignIn() {
                   </svg>
                 </div>
                 <input
-                  className="block w-full pl-11 pr-4 py-3 bg-gray-50 rounded-md border-0 ring-1 ring-gray-200 focus:ring-2 focus:ring-blue-600 transition-all text-gray-900 placeholder-gray-400"
+                  className="block w-full pl-11 pr-4 py-3 bg-gray-50 rounded-md border-0 ring-1 ring-gray-200 focus:ring-2 focus:ring-blue-600 transition-all text-black placeholder-gray-400"
                   id="password"
                   name="password"
                   placeholder="••••••••"
@@ -164,7 +164,7 @@ export default function SignIn() {
 
           {/* Footer Link */}
           <div className="mt-10 text-center">
-            <p className="text-gray-600 text-xs">
+            <p className="text-black text-xs">
               Don't have an account?{' '}
               <Link href="/auth/signup" className="text-blue-600 font-bold hover:underline ml-1">
                 Request Membership

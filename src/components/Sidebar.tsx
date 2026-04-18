@@ -19,7 +19,7 @@ export default function Sidebar() {
   return (
     <aside className="w-64 bg-white border-r border-gray-200 min-h-screen fixed left-0 top-0 z-10">
       <div className="p-6">
-        <Link href="/dashboard" className="text-xl font-black tracking-tighter text-gray-900">
+        <Link href="/dashboard" className="text-xl font-black tracking-tighter text-black">
           TradeSphere
         </Link>
       </div>
@@ -29,10 +29,10 @@ export default function Sidebar() {
           <Link
             key={item.path}
             href={item.path}
-            className={`flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all ${
+            className={`flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-semibold transition-all ${
               isActive(item.path)
                 ? 'bg-blue-50 text-blue-700'
-                : 'text-gray-700 hover:bg-gray-50'
+                : 'text-black hover:bg-gray-50'
             }`}
           >
             <span className="material-symbols-outlined text-xl">{item.icon}</span>

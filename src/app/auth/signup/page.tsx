@@ -60,10 +60,10 @@ export default function SignUp() {
           {/* Logo Section */}
           <div className="flex flex-col items-center mb-10">
             <div className="mb-4">
-              <span className="text-xl font-black tracking-tighter text-gray-900">TradeSphere</span>
+              <span className="text-xl font-black tracking-tighter text-black">TradeSphere</span>
             </div>
-            <h1 className="text-gray-900 text-2xl font-bold tracking-tight mb-2">Request Membership</h1>
-            <p className="text-gray-600 text-sm text-center">
+            <h1 className="text-black text-2xl font-bold tracking-tight mb-2">Request Membership</h1>
+            <p className="text-black text-sm text-center">
               Join the institutional-grade Indian stock trading platform.
             </p>
           </div>
@@ -79,7 +79,7 @@ export default function SignUp() {
           <form onSubmit={handleSubmit} className="space-y-6">
             {/* Email Field */}
             <div className="space-y-2">
-              <label className="block text-xs font-medium uppercase tracking-[0.05em] text-gray-600 ml-1" htmlFor="email">
+              <label className="block text-xs font-semibold uppercase tracking-[0.05em] text-black ml-1" htmlFor="email">
                 Email Address
               </label>
               <div className="relative group">
@@ -103,7 +103,7 @@ export default function SignUp() {
 
             {/* Password Field */}
             <div className="space-y-2">
-              <label className="block text-xs font-medium uppercase tracking-[0.05em] text-gray-600 ml-1" htmlFor="password">
+              <label className="block text-xs font-semibold uppercase tracking-[0.05em] text-black ml-1" htmlFor="password">
                 Password
               </label>
               <div className="relative group">
@@ -113,7 +113,7 @@ export default function SignUp() {
                   </svg>
                 </div>
                 <input
-                  className="block w-full pl-11 pr-4 py-3 bg-gray-50 rounded-md border-0 ring-1 ring-gray-200 focus:ring-2 focus:ring-blue-600 transition-all text-gray-900 placeholder-gray-400"
+                  className="block w-full pl-11 pr-4 py-3 bg-gray-50 rounded-md border-0 ring-1 ring-gray-200 focus:ring-2 focus:ring-blue-600 transition-all text-black placeholder-gray-400"
                   id="password"
                   name="password"
                   placeholder="••••••••"
@@ -127,7 +127,7 @@ export default function SignUp() {
 
             {/* Confirm Password Field */}
             <div className="space-y-2">
-              <label className="block text-xs font-medium uppercase tracking-[0.05em] text-gray-600 ml-1" htmlFor="confirmPassword">
+              <label className="block text-xs font-semibold uppercase tracking-[0.05em] text-black ml-1" htmlFor="confirmPassword">
                 Confirm Password
               </label>
               <div className="relative group">
@@ -137,7 +137,7 @@ export default function SignUp() {
                   </svg>
                 </div>
                 <input
-                  className="block w-full pl-11 pr-4 py-3 bg-gray-50 rounded-md border-0 ring-1 ring-gray-200 focus:ring-2 focus:ring-blue-600 transition-all text-gray-900 placeholder-gray-400"
+                  className="block w-full pl-11 pr-4 py-3 bg-gray-50 rounded-md border-0 ring-1 ring-gray-200 focus:ring-2 focus:ring-blue-600 transition-all text-black placeholder-gray-400"
                   id="confirmPassword"
                   name="confirmPassword"
                   placeholder="••••••••"
@@ -195,7 +195,7 @@ export default function SignUp() {
 
           {/* Footer Link */}
           <div className="mt-10 text-center">
-            <p className="text-gray-600 text-xs">
+            <p className="text-black text-xs">
               Already have an account?{' '}
               <Link href="/auth/signin" className="text-blue-600 font-bold hover:underline ml-1">
                 Sign In
