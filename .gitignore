@@ -46,6 +46,3 @@ stitch_tradesphere_virtual_trading_simulator/
 *.swp
 *.swo
 *~
-
-# Local setup guides with credentials
-LOCAL_SETUP_GUIDE.md

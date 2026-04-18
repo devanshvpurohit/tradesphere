@@ -1,9 +1,10 @@
 'use client';
 
 import { useEffect, useState, useRef } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import Sidebar from '@/components/Sidebar';
 import TopNav from '@/components/TopNav';
+import TradingModal from '@/components/TradingModal';
 import { createChart, ColorType } from 'lightweight-charts';
 
 interface StockQuote {
@@ -21,18 +22,17 @@ interface StockQuote {
 
 export default function StockDetail() {
   const params = useParams();
-  const router = useRouter();
   const symbol = params.symbol as string;
   const chartContainerRef = useRef<HTMLDivElement>(null);
 
   const [quote, setQuote] = useState<StockQuote | null>(null);
   const [loading, setLoading] = useState(true);
-  const [quantity, setQuantity] = useState(1);
-  const [trading, setTrading] = useState(false);
-  const [message, setMessage] = useState('');
+  const [isTradingModalOpen, setIsTradingModalOpen] = useState(false);
+  const [availableQuantity, setAvailableQuantity] = useState(0);
 
   useEffect(() => {
     fetchStockData();
+    fetchPortfolio();
   }, [symbol]);
 
   const fetchStockData = async () => {
@@ -82,29 +82,14 @@ export default function StockDetail() {
     }
   };
 
-  const handleTrade = async (type: 'buy' | 'sell') => {
-    setTrading(true);
-    setMessage('');
-
+  const fetchPortfolio = async () => {
     try {
-      const response = await fetch(`/api/trade/${type}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ symbol, quantity }),
-      });
-
+      const response = await fetch('/api/portfolio');
       const data = await response.json();
-
-      if (response.ok) {
-        setMessage(`Successfully ${type === 'buy' ? 'bought' : 'sold'} ${quantity} shares!`);
-        setTimeout(() => router.push('/portfolio'), 1500);
-      } else {
-        setMessage(data.error || `Failed to ${type} stock`);
-      }
+      const holding = data.portfolio?.find((p: any) => p.stockSymbol === symbol);
+      setAvailableQuantity(holding?.quantity || 0);
     } catch (error) {
-      setMessage(`Error ${type}ing stock`);
-    } finally {
-      setTrading(false);
+      console.error('Error fetching portfolio:', error);
     }
   };
 
@@ -147,6 +132,12 @@ export default function StockDetail() {
                   <h1 className="text-3xl font-bold text-gray-900">{quote.symbol}</h1>
                 </div>
                 <p className="text-gray-600 text-lg">{quote.name}</p>
+                {availableQuantity > 0 && (
+                  <div className="mt-2 inline-flex items-center gap-2 px-3 py-1 bg-blue-50 text-blue-700 rounded-full text-sm font-medium">
+                    <span className="material-symbols-outlined text-sm">account_balance_wallet</span>
+                    <span>You own {availableQuantity} shares</span>
+                  </div>
+                )}
               </div>
               <div className="text-right">
                 <div className="text-4xl font-bold text-gray-900">₹{quote.price.toFixed(2)}</div>
@@ -194,67 +185,78 @@ export default function StockDetail() {
               <div ref={chartContainerRef} />
             </div>
 
-            {/* Trading Panel */}
+            {/* Quick Trade Panel */}
             <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
               <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
                 <span className="material-symbols-outlined">swap_horiz</span>
-                Trade
+                Quick Trade
               </h2>
-
-              {message && (
-                <div
-                  className={`p-3 rounded-lg mb-4 text-sm ${
-                    message.includes('Successfully')
-                      ? 'bg-green-50 text-green-700 border border-green-200'
-                      : 'bg-red-50 text-red-700 border border-red-200'
-                  }`}
-                >
-                  {message}
-                </div>
-              )}
-
-              <div className="mb-6">
-                <label className="block text-sm font-medium text-gray-700 mb-2 uppercase tracking-wider">
-                  Quantity
-                </label>
-                <input
-                  type="number"
-                  min="1"
-                  value={quantity}
-                  onChange={(e) => setQuantity(parseInt(e.target.value) || 1)}
-                  className="w-full px-4 py-3 bg-gray-50 border border-gray-200 text-gray-900 rounded-lg focus:ring-2 focus:ring-blue-600 focus:border-transparent transition-all"
-                />
-              </div>
-
-              <div className="mb-6 p-4 bg-gray-50 rounded-lg">
-                <div className="text-sm text-gray-600 mb-1 uppercase tracking-wider font-medium">Total Amount</div>
-                <div className="text-3xl font-bold text-gray-900">
-                  ₹{(quote.price * quantity).toFixed(2)}
-                </div>
-              </div>
 
               <div className="space-y-3">
                 <button
-                  onClick={() => handleTrade('buy')}
-                  disabled={trading}
-                  className="w-full bg-green-600 text-white py-4 rounded-lg hover:bg-green-700 transition-all disabled:opacity-50 font-bold flex items-center justify-center gap-2"
+                  onClick={() => setIsTradingModalOpen(true)}
+                  className="w-full bg-gradient-to-r from-blue-600 to-blue-700 text-white py-4 rounded-lg hover:from-blue-700 hover:to-blue-800 transition-all font-bold flex items-center justify-center gap-2 shadow-lg"
                 >
-                  <span className="material-symbols-outlined">add_shopping_cart</span>
-                  {trading ? 'Processing...' : 'Buy'}
+                  <span className="material-symbols-outlined">add_circle</span>
+                  <span>Open Trading Panel</span>
                 </button>
-                <button
-                  onClick={() => handleTrade('sell')}
-                  disabled={trading}
-                  className="w-full bg-red-600 text-white py-4 rounded-lg hover:bg-red-700 transition-all disabled:opacity-50 font-bold flex items-center justify-center gap-2"
-                >
-                  <span className="material-symbols-outlined">sell</span>
-                  {trading ? 'Processing...' : 'Sell'}
-                </button>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    onClick={() => setIsTradingModalOpen(true)}
+                    className="bg-green-600 text-white py-3 rounded-lg hover:bg-green-700 transition-all font-bold flex items-center justify-center gap-2"
+                  >
+                    <span className="material-symbols-outlined text-sm">trending_up</span>
+                    <span>Buy</span>
+                  </button>
+                  <button
+                    onClick={() => setIsTradingModalOpen(true)}
+                    disabled={availableQuantity === 0}
+                    className="bg-red-600 text-white py-3 rounded-lg hover:bg-red-700 transition-all font-bold flex items-center justify-center gap-2 disabled:bg-gray-300 disabled:cursor-not-allowed"
+                  >
+                    <span className="material-symbols-outlined text-sm">trending_down</span>
+                    <span>Sell</span>
+                  </button>
+                </div>
+
+                <div className="mt-6 p-4 bg-gray-50 rounded-lg">
+                  <div className="text-xs text-gray-600 mb-2 uppercase tracking-wider font-medium">
+                    Trading Features
+                  </div>
+                  <ul className="space-y-2 text-sm text-gray-700">
+                    <li className="flex items-center gap-2">
+                      <span className="material-symbols-outlined text-green-600 text-sm">check_circle</span>
+                      <span>Market & Limit Orders</span>
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <span className="material-symbols-outlined text-green-600 text-sm">check_circle</span>
+                      <span>Stop Loss Orders</span>
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <span className="material-symbols-outlined text-green-600 text-sm">check_circle</span>
+                      <span>Intraday & Overnight</span>
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <span className="material-symbols-outlined text-green-600 text-sm">check_circle</span>
+                      <span>Target & SL Options</span>
+                    </li>
+                  </ul>
+                </div>
               </div>
             </div>
           </div>
         </div>
       </div>
+
+      {/* Trading Modal */}
+      <TradingModal
+        isOpen={isTradingModalOpen}
+        onClose={() => setIsTradingModalOpen(false)}
+        stockSymbol={quote.symbol}
+        stockName={quote.name}
+        currentPrice={quote.price}
+        availableQuantity={availableQuantity}
+      />
     </>
   );
 }
