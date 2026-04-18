@@ -182,7 +182,7 @@ export default function StockDetail() {
           wickDownColor: '#ef4444',
         });
 
-        candlestickSeries.setData(chartData);
+        candlestickSeries.setData(chartData as any);
         chart.timeScale().fitContent();
         
         console.log('Candlestick chart rendered successfully');
