@@ -3,6 +3,8 @@ import { createClient } from '@/lib/supabase/server';
 
 import { tradingService } from '@/services/tradingService';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(request: Request) {
   try {
     const supabase = createClient();

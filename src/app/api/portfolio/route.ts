@@ -4,6 +4,8 @@ import { createClient } from '@/lib/supabase/server';
 import { tradingService } from '@/services/tradingService';
 import { prisma } from '@/lib/prisma';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET() {
   try {
     const supabase = createClient();
