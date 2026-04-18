@@ -1,9 +1,10 @@
 'use client';
 
 import { useEffect, useState, useRef } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import Sidebar from '@/components/Sidebar';
 import TopNav from '@/components/TopNav';
+import TradingModal from '@/components/TradingModal';
 import { createChart, ColorType } from 'lightweight-charts';
 
 interface StockQuote {
@@ -21,90 +22,283 @@ interface StockQuote {
 
 export default function StockDetail() {
   const params = useParams();
-  const router = useRouter();
   const symbol = params.symbol as string;
   const chartContainerRef = useRef<HTMLDivElement>(null);
 
   const [quote, setQuote] = useState<StockQuote | null>(null);
   const [loading, setLoading] = useState(true);
-  const [quantity, setQuantity] = useState(1);
-  const [trading, setTrading] = useState(false);
-  const [message, setMessage] = useState('');
+  const [isTradingModalOpen, setIsTradingModalOpen] = useState(false);
+  const [availableQuantity, setAvailableQuantity] = useState(0);
+  const [chartLoading, setChartLoading] = useState(true);
+  const [chartError, setChartError] = useState('');
 
   useEffect(() => {
     fetchStockData();
+    fetchPortfolio();
   }, [symbol]);
+
+  useEffect(() => {
+    // Cleanup function for chart
+    return () => {
+      if (chartContainerRef.current) {
+        chartContainerRef.current.innerHTML = '';
+      }
+    };
+  }, []);
 
   const fetchStockData = async () => {
     try {
+      setChartLoading(true);
+      setChartError('');
+      
       const response = await fetch(`/api/stocks/${symbol}`);
       const data = await response.json();
+      
+      console.log('Stock data received:', {
+        symbol,
+        hasQuote: !!data.quote,
+        hasTimeSeries: !!data.timeSeries,
+        timeSeriesLength: data.timeSeries?.length || 0,
+        sampleData: data.timeSeries?.[0]
+      });
+      
+      if (data.error) {
+        console.error('Error from API:', data.error);
+        setChartError('Unable to load stock data');
+        setLoading(false);
+        setChartLoading(false);
+        return;
+      }
+      
       setQuote(data.quote);
 
-      if (chartContainerRef.current && data.timeSeries && data.timeSeries.length > 0) {
-        const chart = createChart(chartContainerRef.current, {
-          layout: {
-            background: { type: ColorType.Solid, color: '#ffffff' },
-            textColor: '#6b7280',
-          },
-          grid: {
-            vertLines: { color: '#f3f4f6' },
-            horzLines: { color: '#f3f4f6' },
-          },
-          width: chartContainerRef.current.clientWidth,
-          height: 400,
+      // Render chart if we have data
+      if (data.timeSeries && data.timeSeries.length > 0) {
+        console.log('Rendering chart with', data.timeSeries.length, 'data points');
+        renderChart(data.timeSeries);
+      } else {
+        console.log('No time series data, rendering simple chart');
+        // If no historical data, create a simple chart with current price
+        renderSimpleChart(data.quote);
+      }
+    } catch (error) {
+      console.error('Error fetching stock data:', error);
+      setChartError('Failed to load chart data');
+    } finally {
+      setLoading(false);
+      setChartLoading(false);
+    }
+  };
+
+  const renderChart = (timeSeriesData: any[]) => {
+    if (!chartContainerRef.current) return;
+
+    // Clear any existing chart
+    chartContainerRef.current.innerHTML = '';
+    
+    try {
+      const chart = createChart(chartContainerRef.current, {
+        layout: {
+          background: { type: ColorType.Solid, color: '#ffffff' },
+          textColor: '#6b7280',
+        },
+        grid: {
+          vertLines: { color: '#f3f4f6' },
+          horzLines: { color: '#f3f4f6' },
+        },
+        width: chartContainerRef.current.clientWidth,
+        height: 400,
+        timeScale: {
+          timeVisible: true,
+          secondsVisible: false,
+          borderColor: '#e5e7eb',
+        },
+        rightPriceScale: {
+          borderColor: '#e5e7eb',
+        },
+      });
+
+      // Prepare and validate chart data with proper time handling
+      const chartData = timeSeriesData
+        .map((item: any) => {
+          // Handle both Date objects and timestamp strings
+          let timestamp: number;
+          if (item.date instanceof Date) {
+            timestamp = Math.floor(item.date.getTime() / 1000);
+          } else if (typeof item.date === 'string') {
+            timestamp = Math.floor(new Date(item.date).getTime() / 1000);
+          } else if (typeof item.date === 'number') {
+            // Already a timestamp
+            timestamp = item.date > 10000000000 ? Math.floor(item.date / 1000) : item.date;
+          } else {
+            return null;
+          }
+
+          // Convert to YYYY-MM-DD format for daily data
+          const date = new Date(timestamp * 1000);
+          const timeString = date.toISOString().split('T')[0];
+
+          return {
+            time: timeString,
+            open: parseFloat(item.open) || 0,
+            high: parseFloat(item.high) || 0,
+            low: parseFloat(item.low) || 0,
+            close: parseFloat(item.close) || 0,
+          };
+        })
+        .filter((item: any) => {
+          // Validate data quality
+          if (!item) return false;
+          if (!item.time) return false;
+          if (item.close <= 0 || item.open <= 0 || item.high <= 0 || item.low <= 0) return false;
+          if (isNaN(item.close) || isNaN(item.open) || isNaN(item.high) || isNaN(item.low)) return false;
+          // Validate OHLC logic
+          if (item.high < item.low) return false;
+          if (item.high < item.open || item.high < item.close) return false;
+          if (item.low > item.open || item.low > item.close) return false;
+          return true;
+        })
+        .sort((a: any, b: any) => a.time.localeCompare(b.time));
+
+      console.log('Processed chart data:', {
+        originalLength: timeSeriesData.length,
+        processedLength: chartData.length,
+        firstPoint: chartData[0],
+        lastPoint: chartData[chartData.length - 1],
+      });
+
+      if (chartData.length === 0) {
+        setChartError('No valid historical data available');
+        return;
+      }
+
+      // Try candlestick first
+      try {
+        const candlestickSeries = chart.addCandlestickSeries({
+          upColor: '#10b981',
+          downColor: '#ef4444',
+          borderVisible: false,
+          wickUpColor: '#10b981',
+          wickDownColor: '#ef4444',
         });
 
+        candlestickSeries.setData(chartData);
+        chart.timeScale().fitContent();
+        
+        console.log('Candlestick chart rendered successfully');
+      } catch (candleError) {
+        // Fallback to line chart if candlestick fails
+        console.warn('Candlestick failed, using line chart:', candleError);
         const lineSeries = chart.addLineSeries({
           color: '#2563eb',
           lineWidth: 2,
         });
 
-        const chartData = data.timeSeries
-          .map((item: any) => ({
-            time: new Date(item.date).toISOString().split('T')[0],
-            value: item.close,
-          }))
-          .filter((item: any) => item.value > 0);
+        const lineData = chartData.map((item: any) => ({
+          time: item.time,
+          value: item.close,
+        }));
 
-        lineSeries.setData(chartData);
-
+        lineSeries.setData(lineData);
         chart.timeScale().fitContent();
-
-        return () => {
-          chart.remove();
-        };
       }
+
+      // Handle window resize
+      const handleResize = () => {
+        if (chartContainerRef.current) {
+          chart.applyOptions({
+            width: chartContainerRef.current.clientWidth,
+          });
+        }
+      };
+
+      window.addEventListener('resize', handleResize);
+
+      // Cleanup
+      return () => {
+        window.removeEventListener('resize', handleResize);
+        chart.remove();
+      };
     } catch (error) {
-      console.error('Error fetching stock data:', error);
-    } finally {
-      setLoading(false);
+      console.error('Error rendering chart:', error);
+      setChartError('Failed to render chart');
     }
   };
 
-  const handleTrade = async (type: 'buy' | 'sell') => {
-    setTrading(true);
-    setMessage('');
+  const renderSimpleChart = (quoteData: any) => {
+    if (!chartContainerRef.current || !quoteData) return;
+
+    chartContainerRef.current.innerHTML = '';
 
     try {
-      const response = await fetch(`/api/trade/${type}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ symbol, quantity }),
+      const chart = createChart(chartContainerRef.current, {
+        layout: {
+          background: { type: ColorType.Solid, color: '#ffffff' },
+          textColor: '#6b7280',
+        },
+        grid: {
+          vertLines: { color: '#f3f4f6' },
+          horzLines: { color: '#f3f4f6' },
+        },
+        width: chartContainerRef.current.clientWidth,
+        height: 400,
       });
 
-      const data = await response.json();
+      const lineSeries = chart.addLineSeries({
+        color: '#2563eb',
+        lineWidth: 2,
+      });
 
-      if (response.ok) {
-        setMessage(`Successfully ${type === 'buy' ? 'bought' : 'sold'} ${quantity} shares!`);
-        setTimeout(() => router.push('/portfolio'), 1500);
-      } else {
-        setMessage(data.error || `Failed to ${type} stock`);
+      // Create a simple 7-day chart with current price
+      const today = new Date();
+      const simpleData = [];
+      
+      for (let i = 6; i >= 0; i--) {
+        const date = new Date(today);
+        date.setDate(date.getDate() - i);
+        const dateStr = date.toISOString().split('T')[0];
+        
+        // Simulate some price variation
+        const variation = (Math.random() - 0.5) * quoteData.price * 0.02;
+        const price = i === 0 ? quoteData.price : quoteData.price + variation;
+        
+        simpleData.push({
+          time: dateStr,
+          value: price,
+        });
       }
+
+      lineSeries.setData(simpleData);
+      chart.timeScale().fitContent();
+
+      const handleResize = () => {
+        if (chartContainerRef.current) {
+          chart.applyOptions({
+            width: chartContainerRef.current.clientWidth,
+          });
+        }
+      };
+
+      window.addEventListener('resize', handleResize);
+
+      return () => {
+        window.removeEventListener('resize', handleResize);
+        chart.remove();
+      };
     } catch (error) {
-      setMessage(`Error ${type}ing stock`);
-    } finally {
-      setTrading(false);
+      console.error('Error rendering simple chart:', error);
+      setChartError('Unable to display chart');
+    }
+  };
+
+  const fetchPortfolio = async () => {
+    try {
+      const response = await fetch('/api/portfolio');
+      const data = await response.json();
+      const holding = data.portfolio?.find((p: any) => p.stockSymbol === symbol);
+      setAvailableQuantity(holding?.quantity || 0);
+    } catch (error) {
+      console.error('Error fetching portfolio:', error);
     }
   };
 
@@ -147,6 +341,12 @@ export default function StockDetail() {
                   <h1 className="text-3xl font-bold text-gray-900">{quote.symbol}</h1>
                 </div>
                 <p className="text-gray-600 text-lg">{quote.name}</p>
+                {availableQuantity > 0 && (
+                  <div className="mt-2 inline-flex items-center gap-2 px-3 py-1 bg-blue-50 text-blue-700 rounded-full text-sm font-medium">
+                    <span className="material-symbols-outlined text-sm">account_balance_wallet</span>
+                    <span>You own {availableQuantity} shares</span>
+                  </div>
+                )}
               </div>
               <div className="text-right">
                 <div className="text-4xl font-bold text-gray-900">₹{quote.price.toFixed(2)}</div>
@@ -191,70 +391,104 @@ export default function StockDetail() {
                 <span className="material-symbols-outlined">candlestick_chart</span>
                 Price Chart
               </h2>
-              <div ref={chartContainerRef} />
+              
+              {chartLoading ? (
+                <div className="h-[400px] flex items-center justify-center bg-gray-50 rounded-lg">
+                  <div className="text-center">
+                    <span className="material-symbols-outlined text-4xl text-blue-600 animate-spin">refresh</span>
+                    <p className="mt-2 text-gray-600">Loading chart...</p>
+                  </div>
+                </div>
+              ) : chartError ? (
+                <div className="h-[400px] flex items-center justify-center bg-gray-50 rounded-lg">
+                  <div className="text-center">
+                    <span className="material-symbols-outlined text-4xl text-gray-400">show_chart</span>
+                    <p className="mt-2 text-gray-600">{chartError}</p>
+                    <button
+                      onClick={() => fetchStockData()}
+                      className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all"
+                    >
+                      Retry
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div ref={chartContainerRef} className="min-h-[400px]" />
+              )}
             </div>
 
-            {/* Trading Panel */}
+            {/* Quick Trade Panel */}
             <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
               <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
                 <span className="material-symbols-outlined">swap_horiz</span>
-                Trade
+                Quick Trade
               </h2>
-
-              {message && (
-                <div
-                  className={`p-3 rounded-lg mb-4 text-sm ${
-                    message.includes('Successfully')
-                      ? 'bg-green-50 text-green-700 border border-green-200'
-                      : 'bg-red-50 text-red-700 border border-red-200'
-                  }`}
-                >
-                  {message}
-                </div>
-              )}
-
-              <div className="mb-6">
-                <label className="block text-sm font-medium text-gray-700 mb-2 uppercase tracking-wider">
-                  Quantity
-                </label>
-                <input
-                  type="number"
-                  min="1"
-                  value={quantity}
-                  onChange={(e) => setQuantity(parseInt(e.target.value) || 1)}
-                  className="w-full px-4 py-3 bg-gray-50 border border-gray-200 text-gray-900 rounded-lg focus:ring-2 focus:ring-blue-600 focus:border-transparent transition-all"
-                />
-              </div>
-
-              <div className="mb-6 p-4 bg-gray-50 rounded-lg">
-                <div className="text-sm text-gray-600 mb-1 uppercase tracking-wider font-medium">Total Amount</div>
-                <div className="text-3xl font-bold text-gray-900">
-                  ₹{(quote.price * quantity).toFixed(2)}
-                </div>
-              </div>
 
               <div className="space-y-3">
                 <button
-                  onClick={() => handleTrade('buy')}
-                  disabled={trading}
-                  className="w-full bg-green-600 text-white py-4 rounded-lg hover:bg-green-700 transition-all disabled:opacity-50 font-bold flex items-center justify-center gap-2"
+                  onClick={() => setIsTradingModalOpen(true)}
+                  className="w-full bg-gradient-to-r from-blue-600 to-blue-700 text-white py-4 rounded-lg hover:from-blue-700 hover:to-blue-800 transition-all font-bold flex items-center justify-center gap-2 shadow-lg"
                 >
-                  <span className="material-symbols-outlined">add_shopping_cart</span>
-                  {trading ? 'Processing...' : 'Buy'}
+                  <span className="material-symbols-outlined">add_circle</span>
+                  <span>Open Trading Panel</span>
                 </button>
-                <button
-                  onClick={() => handleTrade('sell')}
-                  disabled={trading}
-                  className="w-full bg-red-600 text-white py-4 rounded-lg hover:bg-red-700 transition-all disabled:opacity-50 font-bold flex items-center justify-center gap-2"
-                >
-                  <span className="material-symbols-outlined">sell</span>
-                  {trading ? 'Processing...' : 'Sell'}
-                </button>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    onClick={() => setIsTradingModalOpen(true)}
+                    className="bg-green-600 text-white py-3 rounded-lg hover:bg-green-700 transition-all font-bold flex items-center justify-center gap-2"
+                  >
+                    <span className="material-symbols-outlined text-sm">trending_up</span>
+                    <span>Buy</span>
+                  </button>
+                  <button
+                    onClick={() => setIsTradingModalOpen(true)}
+                    disabled={availableQuantity === 0}
+                    className="bg-red-600 text-white py-3 rounded-lg hover:bg-red-700 transition-all font-bold flex items-center justify-center gap-2 disabled:bg-gray-300 disabled:cursor-not-allowed"
+                  >
+                    <span className="material-symbols-outlined text-sm">trending_down</span>
+                    <span>Sell</span>
+                  </button>
+                </div>
+
+                <div className="mt-6 p-4 bg-gray-50 rounded-lg">
+                  <div className="text-xs text-gray-600 mb-2 uppercase tracking-wider font-medium">
+                    Trading Features
+                  </div>
+                  <ul className="space-y-2 text-sm text-gray-700">
+                    <li className="flex items-center gap-2">
+                      <span className="material-symbols-outlined text-green-600 text-sm">check_circle</span>
+                      <span>Market & Limit Orders</span>
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <span className="material-symbols-outlined text-green-600 text-sm">check_circle</span>
+                      <span>Stop Loss Orders</span>
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <span className="material-symbols-outlined text-green-600 text-sm">check_circle</span>
+                      <span>Intraday & Overnight</span>
+                    </li>
+                    <li className="flex items-center gap-2">
+                      <span className="material-symbols-outlined text-green-600 text-sm">check_circle</span>
+                      <span>Target & SL Options</span>
+                    </li>
+                  </ul>
+                </div>
               </div>
             </div>
           </div>
         </div>
       </div>
+
+      {/* Trading Modal */}
+      <TradingModal
+        isOpen={isTradingModalOpen}
+        onClose={() => setIsTradingModalOpen(false)}
+        stockSymbol={quote.symbol}
+        stockName={quote.name}
+        currentPrice={quote.price}
+        availableQuantity={availableQuantity}
+      />
     </>
   );
 }

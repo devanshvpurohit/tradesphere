@@ -7,7 +7,7 @@ import Link from 'next/link';
 
 interface Stock {
   symbol: string;
-  name: string;
+  name?: string;
   price: number;
   change: number;
   changePercent: number;
@@ -15,13 +15,16 @@ interface Stock {
 
 export default function Stocks() {
   const [stocks, setStocks] = useState<Stock[]>([]);
+  const [indianStocks, setIndianStocks] = useState<Stock[]>([]);
   const [loading, setLoading] = useState(true);
+  const [indianLoading, setIndianLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [searching, setSearching] = useState(false);
 
   useEffect(() => {
     fetchStocks();
+    fetchIndianStocks();
   }, []);
 
   const fetchStocks = async () => {
@@ -33,6 +36,18 @@ export default function Stocks() {
       console.error('Error fetching stocks:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchIndianStocks = async () => {
+    try {
+      const response = await fetch('/api/stocks?market=indian');
+      const data = await response.json();
+      setIndianStocks(data.stocks);
+    } catch (error) {
+      console.error('Error fetching Indian stocks:', error);
+    } finally {
+      setIndianLoading(false);
     }
   };
 
@@ -133,9 +148,12 @@ export default function Stocks() {
               <div className="mt-4">Loading stocks...</div>
             </div>
           ) : (
-            <div className="bg-white rounded-lg shadow-sm overflow-hidden border border-gray-200">
+            <div className="bg-white rounded-lg shadow-sm overflow-hidden border border-gray-200 mb-8">
               <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
-                <h2 className="text-lg font-bold text-gray-900">Popular Stocks</h2>
+                <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                  <span className="material-symbols-outlined">trending_up</span>
+                  Popular US Stocks
+                </h2>
               </div>
               <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-200">
@@ -168,7 +186,92 @@ export default function Stocks() {
                           </div>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
-                          {stock.name || 'N/A'}
+                          {stock.name || stock.symbol}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-right font-medium text-gray-900">
+                          {stock.price ? `₹${stock.price.toFixed(2)}` : 'N/A'}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-right">
+                          {stock.change !== null && stock.changePercent !== null ? (
+                            <div className={`inline-flex items-center gap-1 px-2 py-1 rounded-full ${
+                              stock.change >= 0 ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'
+                            }`}>
+                              <span className="material-symbols-outlined text-xs">
+                                {stock.change >= 0 ? 'arrow_upward' : 'arrow_downward'}
+                              </span>
+                              <span className="font-medium">
+                                {stock.change >= 0 ? '+' : ''}
+                                {stock.change.toFixed(2)} ({stock.changePercent.toFixed(2)}%)
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="text-gray-400">N/A</span>
+                          )}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-right">
+                          <Link
+                            href={`/stocks/${stock.symbol}`}
+                            className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-700 font-medium"
+                          >
+                            <span>Trade</span>
+                            <span className="material-symbols-outlined text-sm">arrow_forward</span>
+                          </Link>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Top Indian Stocks */}
+          {indianLoading ? (
+            <div className="text-center py-12 text-gray-900">
+              <span className="material-symbols-outlined text-4xl animate-spin">refresh</span>
+              <div className="mt-4">Loading Indian stocks...</div>
+            </div>
+          ) : (
+            <div className="bg-white rounded-lg shadow-sm overflow-hidden border border-gray-200">
+              <div className="px-6 py-4 border-b border-gray-200 bg-gradient-to-r from-orange-50 to-green-50">
+                <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                  <span className="material-symbols-outlined">flag</span>
+                  Top Indian Stocks (NSE)
+                </h2>
+                <p className="text-sm text-gray-600 mt-1">Leading stocks from National Stock Exchange</p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">
+                        Symbol
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">
+                        Name
+                      </th>
+                      <th className="px-6 py-3 text-right text-xs font-bold text-gray-700 uppercase tracking-wider">
+                        Price
+                      </th>
+                      <th className="px-6 py-3 text-right text-xs font-bold text-gray-700 uppercase tracking-wider">
+                        Change
+                      </th>
+                      <th className="px-6 py-3 text-right text-xs font-bold text-gray-700 uppercase tracking-wider">
+                        Action
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {indianStocks.map((stock) => (
+                      <tr key={stock.symbol} className="hover:bg-gray-50 transition-colors">
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="flex items-center gap-2">
+                            <span className="material-symbols-outlined text-orange-600">show_chart</span>
+                            <span className="text-sm font-bold text-gray-900">{stock.symbol}</span>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                          {stock.name || stock.symbol}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-right font-medium text-gray-900">
                           {stock.price ? `₹${stock.price.toFixed(2)}` : 'N/A'}

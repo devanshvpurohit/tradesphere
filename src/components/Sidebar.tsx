@@ -12,6 +12,7 @@ export default function Sidebar() {
     { path: '/dashboard', label: 'Dashboard', icon: 'dashboard' },
     { path: '/stocks', label: 'Market', icon: 'trending_up' },
     { path: '/portfolio', label: 'Portfolio', icon: 'account_balance_wallet' },
+    { path: '/orders', label: 'Orders', icon: 'receipt' },
     { path: '/transactions', label: 'Transactions', icon: 'receipt_long' },
   ];
 

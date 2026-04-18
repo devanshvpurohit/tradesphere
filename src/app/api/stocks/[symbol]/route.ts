@@ -1,18 +1,33 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { marketService } from '@/services/marketService';
 
 export async function GET(
-  request: Request,
+  request: NextRequest,
   { params }: { params: { symbol: string } }
 ) {
   try {
-    const symbol = params.symbol;
-    const quote = await marketService.getStockQuote(symbol);
-    const timeSeries = await marketService.getTimeSeries(symbol, '1mo', '1d');
+    const { symbol } = params;
+
+    if (!symbol) {
+      return NextResponse.json({ error: 'Symbol is required' }, { status: 400 });
+    }
+
+    // Fetch quote and time series data with fallback
+    const [quote, timeSeries] = await Promise.allSettled([
+      marketService.getStockQuote(symbol),
+      marketService.getTimeSeries(symbol, '1mo', '1d'),
+    ]);
+
+    if (quote.status === 'rejected') {
+      return NextResponse.json(
+        { error: 'Market data unavailable for this stock. Please try again later.' },
+        { status: 404 }
+      );
+    }
 
     return NextResponse.json({
-      quote,
-      timeSeries,
+      quote: quote.value,
+      timeSeries: timeSeries.status === 'fulfilled' ? timeSeries.value : [],
     });
   } catch (error) {
     console.error('Error fetching stock details:', error);
