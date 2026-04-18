@@ -12,8 +12,8 @@ const sellSchema = z.object({
 export async function POST(request: Request) {
   try {
     const supabase = createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    const session = user ? { user } : null;
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    const session = authUser ? { user: authUser } : null;
 
     if (!session?.user?.id) {
       return NextResponse.json(
