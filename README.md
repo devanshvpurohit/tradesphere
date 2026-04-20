@@ -12,6 +12,7 @@ A full-stack virtual stock trading platform built with Next.js, featuring real-t
 - 🎨 **Premium UI/UX** - Institutional-grade design with Material Symbols
 - 🇮🇳 **Indian Market Focus** - NSE/BSE references, IST timezone, ₹ currency
 
+
 ## Tech Stack
 
 - **Framework**: Next.js 14 (App Router)
@@ -20,7 +21,7 @@ A full-stack virtual stock trading platform built with Next.js, featuring real-t
 - **Authentication**: NextAuth.js
 - **Styling**: Tailwind CSS
 - **Charts**: Lightweight Charts
-- **Market Data**: Finnhub API
+- **Market Data**: Finnhub API along with yahooo finace 
 - **Icons**: Material Symbols Outlined
 
 ## Getting Started
