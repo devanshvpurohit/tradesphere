@@ -33,11 +33,13 @@ We built **TradeSphere** to democratize professional, institutional-grade market
 3. **NSE Options Desk & Black-Scholes Greeks (F&O)**:
    - Uses open-source [`black-scholes`](https://github.com/benjamincburns/black-scholes) differential equations.
    - Real-time **NIFTY 50** & **BANK NIFTY** Option Chain with Call/Put LTP, Delta ($\Delta$), Theta ($\theta$), Gamma ($\gamma$), Vega ($\nu$), Put-Call Ratio (PCR), and Max Pain Strike.
-4. **Autonomous AI Agent Trading Playground & Bot Sandbox**:
-   - Built-in strategy code editor where users can compile and backtest custom algorithmic AI agents in TypeScript/JavaScript.
-   - Ready-to-run templates: **RSI Momentum Scalper**, **MACD Trend Follower**, and **Bollinger Breakout**.
-   - Backtest scorecard metrics: **Net Profit (₹ and %)**, **Win Rate %**, **Sharpe Ratio**, **Max Drawdown %**, and step-by-step trade execution audit logs.
-   - Programmatic REST API (`/api/agents/trade` and `/api/ai/analyze`) enabling external **Python bots**, **LangChain**, **CrewAI**, or **AutoGen** agents to execute paper trades directly into TradeSphere!
+4. **Multi-LLM Autonomous AI Agent Studio & Quant Sandbox**:
+   - **Build Your Own AI Trading Agents**: Users can create custom autonomous trading agents powered by **Ollama (100% Free & Local)**, **OpenAI (GPT-4o/mini)**, **Anthropic Claude (3.5 Sonnet/Haiku)**, **Google Gemini (1.5 Flash/Pro)**, **Groq (LLaMA 3.3 70B)**, or **OpenRouter**.
+   - **Local Ollama Auto-Discovery**: Automatically queries `http://localhost:11434` to discover locally installed models (Gemma, Llama 3.2, Mistral, DeepSeek R1). Allows 100% private, zero-API-key algorithmic decision making directly on user hardware.
+   - **Client-Side Key Privacy**: Cloud provider API keys are stored strictly in client-side `localStorage`, never exposed publicly.
+   - **Real-Time Agent Market Evaluation**: Agents receive live stock quotes, RSI, MACD, 20 EMA, 50 SMA, Bollinger Bands, and portfolio cash limits to produce structured BUY/SELL/HOLD recommendations, target prices, stop-losses, and risk-reward ratios with 1-click execution into Firestore.
+   - **Rule-Based Quant Code IDE & Backtester**: Built-in strategy code editor where users can compile and backtest algorithmic strategies against real-world candle datasets with Sharpe ratio, Win Rate %, and Max Drawdown %.
+   - **External Webhooks**: REST endpoints (`POST /api/agents/trade`) for Python, LangChain, AutoGen, and CrewAI swarms.
 5. **Zerodha Kite & TradingView Inspired Terminal UI/UX**:
    - High-contrast dark terminal palette with ambient radar status indicators.
    - **Continuous Scrolling Ticker Tape**: Live index ticks for NIFTY 50, SENSEX, BANK NIFTY, and large-cap equities.

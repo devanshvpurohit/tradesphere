@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Sidebar from '@/components/Sidebar';
 import TopNav from '@/components/TopNav';
 import { toast } from 'sonner';
@@ -19,24 +19,404 @@ import {
   AlertCircle,
   Code2,
   Activity,
-  Layers,
   Copy,
   Check,
+  Plus,
+  Settings2,
+  Key,
+  Trash2,
+  Eye,
+  EyeOff,
+  Zap,
+  ShieldAlert,
+  Sliders,
+  Server,
+  Layers,
+  ChevronDown,
+  ChevronUp,
+  Radio,
+  Clock,
+  ArrowRight,
 } from 'lucide-react';
 import { AGENT_TEMPLATES, BacktestResult } from '@/lib/agents/engine';
+import {
+  AIProvider,
+  CustomAgentConfig,
+  AgentTradeDecision,
+  PROVIDER_METADATA,
+  PRESET_AGENTS,
+} from '@/lib/agents/customAgent';
 
 export default function AgentPlayground() {
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [playgroundMode, setPlaygroundMode] = useState<'LLM_AGENTS' | 'QUANT_CODE' | 'API_DOCS'>('LLM_AGENTS');
+
+  // ==========================================
+  // LLM AGENT STUDIO STATE
+  // ==========================================
+  const [agents, setAgents] = useState<CustomAgentConfig[]>(PRESET_AGENTS);
+  const [activeAgentId, setActiveAgentId] = useState<string>(PRESET_AGENTS[0].id);
+  const [evalSymbol, setEvalSymbol] = useState<string>('RELIANCE.NS');
+  const [evaluating, setEvaluating] = useState<boolean>(false);
+  const [decision, setDecision] = useState<AgentTradeDecision | null>(null);
+  const [decisionQuote, setDecisionQuote] = useState<any>(null);
+  const [decisionIndicators, setDecisionIndicators] = useState<any>(null);
+  const [executingOrder, setExecutingOrder] = useState<boolean>(false);
+  const [showRawOutput, setShowRawOutput] = useState<boolean>(false);
+
+  // Ollama local connectivity state
+  const [ollamaStatus, setOllamaStatus] = useState<{
+    connected: boolean;
+    models: { name: string; sizeMb?: string; parameterSize?: string }[];
+    error?: string;
+  }>({ connected: false, models: [] });
+
+  // Custom Agent Creation/Edit Modal
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingAgent, setEditingAgent] = useState<CustomAgentConfig | null>(null);
+  const [showApiKey, setShowApiKey] = useState(false);
+
+  // Form State for modal
+  const [formName, setFormName] = useState('');
+  const [formRole, setFormRole] = useState('');
+  const [formDescription, setFormDescription] = useState('');
+  const [formAvatar, setFormAvatar] = useState('🤖');
+  const [formProvider, setFormProvider] = useState<AIProvider>('ollama');
+  const [formModel, setFormModel] = useState('gemma3:1b');
+  const [formOllamaUrl, setFormOllamaUrl] = useState('http://localhost:11434');
+  const [formApiKey, setFormApiKey] = useState('');
+  const [formPrompt, setFormPrompt] = useState('');
+  const [formTemperature, setFormTemperature] = useState(0.1);
+  const [formMaxRisk, setFormMaxRisk] = useState(5);
+
+  // User portfolio cash
+  const [portfolioBalance, setPortfolioBalance] = useState<number>(1000000);
+
+  // ==========================================
+  // QUANT CODE BACKTESTER STATE
+  // ==========================================
   const [selectedTemplate, setSelectedTemplate] = useState<string>('rsi_momentum');
   const [code, setCode] = useState<string>(AGENT_TEMPLATES[0].code);
-  const [symbol, setSymbol] = useState<string>('RELIANCE.NS');
-  const [period, setPeriod] = useState<string>('1mo');
+  const [quantSymbol, setQuantSymbol] = useState<string>('RELIANCE.NS');
+  const [quantPeriod, setQuantPeriod] = useState<string>('1mo');
   const [initialCapital, setInitialCapital] = useState<number>(100000);
-  const [loading, setLoading] = useState<boolean>(false);
-  const [result, setResult] = useState<BacktestResult | null>(null);
-  const [activeTab, setActiveTab] = useState<'CONSOLE' | 'TRADES' | 'API'>('CONSOLE');
+  const [quantLoading, setQuantLoading] = useState<boolean>(false);
+  const [quantResult, setQuantResult] = useState<BacktestResult | null>(null);
+  const [quantTab, setQuantTab] = useState<'CONSOLE' | 'TRADES' | 'API'>('CONSOLE');
   const [isCopied, setIsCopied] = useState<boolean>(false);
-  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
+  // Load custom agents and keys from localStorage + probe Ollama
+  useEffect(() => {
+    // 1. Fetch user portfolio balance
+    fetch('/api/portfolio')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data?.portfolio?.balance) {
+          setPortfolioBalance(data.portfolio.balance);
+        }
+      })
+      .catch(() => {});
+
+    // 2. Check Ollama local status
+    fetch('/api/agents/ollama-models')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.connected) {
+          setOllamaStatus({
+            connected: true,
+            models: data.models || [],
+          });
+        } else {
+          setOllamaStatus({
+            connected: false,
+            models: [],
+            error: data.error,
+          });
+        }
+      })
+      .catch((err) => {
+        setOllamaStatus({ connected: false, models: [], error: err.message });
+      });
+
+    // 3. Load saved custom agents & API keys from localStorage
+    try {
+      const savedAgents = localStorage.getItem('tradesphere_custom_agents');
+      const savedKeys = JSON.parse(localStorage.getItem('tradesphere_api_keys') || '{}');
+
+      // Hydrate presets with any stored keys
+      const hydratedPresets = PRESET_AGENTS.map((preset) => {
+        if (savedKeys[preset.provider]) {
+          return { ...preset, apiKey: savedKeys[preset.provider] };
+        }
+        return preset;
+      });
+
+      if (savedAgents) {
+        const parsed = JSON.parse(savedAgents);
+        const hydratedCustom = parsed.map((agent: CustomAgentConfig) => {
+          if (savedKeys[agent.provider] && !agent.apiKey) {
+            return { ...agent, apiKey: savedKeys[agent.provider] };
+          }
+          return agent;
+        });
+        setAgents([...hydratedPresets, ...hydratedCustom]);
+      } else {
+        setAgents(hydratedPresets);
+      }
+    } catch (e) {
+      console.warn('Failed loading agents from localStorage:', e);
+    }
+  }, []);
+
+  const activeAgent = agents.find((a) => a.id === activeAgentId) || agents[0];
+
+  // ==========================================
+  // AGENT MODAL HANDLERS
+  // ==========================================
+  const handleOpenCreateModal = () => {
+    setEditingAgent(null);
+    setFormName('');
+    setFormRole('Algorithmic Scalper');
+    setFormDescription('Custom AI trading agent tailored for technical momentum and breakout setups.');
+    setFormAvatar('🤖');
+    setFormProvider(ollamaStatus.connected ? 'ollama' : 'openai');
+    setFormModel(
+      ollamaStatus.connected && ollamaStatus.models.length > 0
+        ? ollamaStatus.models[0].name
+        : 'gpt-4o-mini'
+    );
+    setFormOllamaUrl('http://localhost:11434');
+
+    const savedKeys = JSON.parse(localStorage.getItem('tradesphere_api_keys') || '{}');
+    setFormApiKey(savedKeys['openai'] || '');
+
+    setFormPrompt(
+      `You are an expert quantitative trading bot.
+Analyze current RSI, MACD, Bollinger Bands, and Moving Averages.
+Look for high-probability setups with minimum 1:2 Risk-Reward ratio.
+Strictly return your final decision as a JSON object.`
+    );
+    setFormTemperature(0.1);
+    setFormMaxRisk(5);
+    setIsModalOpen(true);
+  };
+
+  const handleOpenEditModal = (agent: CustomAgentConfig) => {
+    setEditingAgent(agent);
+    setFormName(agent.name);
+    setFormRole(agent.role);
+    setFormDescription(agent.description);
+    setFormAvatar(agent.avatar);
+    setFormProvider(agent.provider);
+    setFormModel(agent.model);
+    setFormOllamaUrl(agent.ollamaBaseUrl || 'http://localhost:11434');
+    setFormApiKey(agent.apiKey || '');
+    setFormPrompt(agent.systemPrompt);
+    setFormTemperature(agent.temperature);
+    setFormMaxRisk(agent.maxRiskPerTradePercent);
+    setIsModalOpen(true);
+  };
+
+  const handleSaveAgent = () => {
+    if (!formName.trim()) {
+      toast.error('Please enter an Agent Name');
+      return;
+    }
+
+    if (PROVIDER_METADATA[formProvider].requiresApiKey && !formApiKey.trim()) {
+      toast.error(`${PROVIDER_METADATA[formProvider].name} requires an API Key.`);
+      return;
+    }
+
+    // Save key in localStorage for convenience
+    if (formApiKey.trim()) {
+      try {
+        const savedKeys = JSON.parse(localStorage.getItem('tradesphere_api_keys') || '{}');
+        savedKeys[formProvider] = formApiKey.trim();
+        localStorage.setItem('tradesphere_api_keys', JSON.stringify(savedKeys));
+      } catch (e) {
+        console.warn(e);
+      }
+    }
+
+    const agentPayload: CustomAgentConfig = {
+      id: editingAgent ? editingAgent.id : `custom-${Date.now()}`,
+      name: formName.trim(),
+      role: formRole.trim() || 'Custom Trader',
+      description: formDescription.trim() || 'Custom configured agent',
+      avatar: formAvatar,
+      provider: formProvider,
+      model: formModel.trim(),
+      ollamaBaseUrl: formOllamaUrl.trim(),
+      apiKey: formApiKey.trim(),
+      systemPrompt: formPrompt.trim(),
+      temperature: Number(formTemperature),
+      maxRiskPerTradePercent: Number(formMaxRisk),
+      isCustom: true,
+    };
+
+    let updatedAgents: CustomAgentConfig[];
+    if (editingAgent) {
+      updatedAgents = agents.map((a) => (a.id === editingAgent.id ? agentPayload : a));
+      toast.success(`Updated Agent: ${agentPayload.name}`);
+    } else {
+      updatedAgents = [...agents, agentPayload];
+      toast.success(`Created New Agent: ${agentPayload.name}!`);
+      setActiveAgentId(agentPayload.id);
+    }
+
+    setAgents(updatedAgents);
+
+    // Save custom ones to localStorage
+    const customOnly = updatedAgents.filter((a) => a.isCustom);
+    localStorage.setItem('tradesphere_custom_agents', JSON.stringify(customOnly));
+
+    setIsModalOpen(false);
+  };
+
+  const handleDeleteAgent = (agentId: string) => {
+    const updated = agents.filter((a) => a.id !== agentId);
+    setAgents(updated);
+    const customOnly = updated.filter((a) => a.isCustom);
+    localStorage.setItem('tradesphere_custom_agents', JSON.stringify(customOnly));
+    if (activeAgentId === agentId) {
+      setActiveAgentId(updated[0]?.id || PRESET_AGENTS[0].id);
+    }
+    toast.info('Agent deleted.');
+  };
+
+  // ==========================================
+  // RUN AGENT EVALUATION (LLM)
+  // ==========================================
+  const handleRunAgentEvaluation = async () => {
+    if (!activeAgent) return;
+
+    if (PROVIDER_METADATA[activeAgent.provider].requiresApiKey && !activeAgent.apiKey) {
+      toast.error(`API Key Missing for ${PROVIDER_METADATA[activeAgent.provider].name}`, {
+        description: 'Click the Settings icon on your agent to configure your personal API key.',
+      });
+      handleOpenEditModal(activeAgent);
+      return;
+    }
+
+    setEvaluating(true);
+    setDecision(null);
+
+    toast.loading(`Consulting ${activeAgent.name} (${activeAgent.model})...`, {
+      id: 'agent-eval',
+    });
+
+    try {
+      const res = await fetch('/api/agents/llm-decision', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          agent: activeAgent,
+          symbol: evalSymbol,
+          portfolio: {
+            availableCash: portfolioBalance,
+            currentHoldingQuantity: 0,
+          },
+        }),
+      });
+
+      const data = await res.json();
+      toast.dismiss('agent-eval');
+
+      if (res.ok && data.success) {
+        setDecision(data.decision);
+        setDecisionQuote(data.quote);
+        setDecisionIndicators(data.indicators);
+        soundManager.playOrderSuccess();
+
+        if (data.decision.action === 'BUY') {
+          confetti({
+            particleCount: 40,
+            spread: 60,
+            origin: { y: 0.6 },
+          });
+          toast.success(`🚀 ${activeAgent.name} signals BUY for ${evalSymbol}!`, {
+            description: `Confidence: ${data.decision.confidence}% | Target: ₹${data.decision.targetPrice}`,
+          });
+        } else if (data.decision.action === 'SELL') {
+          toast.warning(`⚠️ ${activeAgent.name} signals SELL for ${evalSymbol}`, {
+            description: `Stop Loss: ₹${data.decision.stopLoss} | ${data.decision.reasoning.slice(0, 80)}...`,
+          });
+        } else {
+          toast.info(`⏸️ ${activeAgent.name} recommends HOLD for ${evalSymbol}`, {
+            description: data.decision.reasoning.slice(0, 100),
+          });
+        }
+      } else {
+        soundManager.playOrderCancel();
+        toast.error('Agent Evaluation Failed', {
+          description: data.error || 'Check provider endpoint or API key',
+        });
+      }
+    } catch (err: any) {
+      toast.dismiss('agent-eval');
+      soundManager.playOrderCancel();
+      toast.error('Evaluation Error', { description: err.message || 'Network request failed' });
+    } finally {
+      setEvaluating(false);
+    }
+  };
+
+  // ==========================================
+  // EXECUTE AGENT TRADE IN FIRESTORE
+  // ==========================================
+  const handleExecuteAgentOrder = async () => {
+    if (!decision || decision.action === 'HOLD') return;
+
+    setExecutingOrder(true);
+    try {
+      const res = await fetch('/api/trade/order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          symbol: evalSymbol,
+          quantity: decision.recommendedQuantity || 1,
+          orderSide: decision.action,
+          orderType: 'MARKET',
+          productType: 'MIS',
+          targetPrice: decision.targetPrice,
+          stopLoss: decision.stopLoss,
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok && (data.success || data.order)) {
+        soundManager.playOrderSuccess();
+        confetti({
+          particleCount: 75,
+          spread: 80,
+          origin: { y: 0.5 },
+        });
+        toast.success(`Order Filled: ${decision.action} ${decision.recommendedQuantity} ${evalSymbol}!`, {
+          description: `Executed by AI Agent ${activeAgent.name} at Market LTP.`,
+        });
+
+        // Refresh balance
+        fetch('/api/portfolio')
+          .then((r) => r.json())
+          .then((d) => {
+            if (d?.portfolio?.balance) setPortfolioBalance(d.portfolio.balance);
+          });
+      } else {
+        soundManager.playOrderCancel();
+        toast.error('Order Execution Failed', { description: data.error || 'Trade rejected' });
+      }
+    } catch (err: any) {
+      soundManager.playOrderCancel();
+      toast.error('Trade Execution Error', { description: err.message });
+    } finally {
+      setExecutingOrder(false);
+    }
+  };
+
+  // ==========================================
+  // QUANT CODE SIMULATOR HANDLER
+  // ==========================================
   const handleSelectTemplate = (id: string) => {
     setSelectedTemplate(id);
     const tmpl = AGENT_TEMPLATES.find((t) => t.id === id);
@@ -47,22 +427,22 @@ export default function AgentPlayground() {
   };
 
   const handleRunSimulation = async () => {
-    setLoading(true);
+    setQuantLoading(true);
     try {
       const res = await fetch('/api/agents/backtest', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           code,
-          symbol,
-          period,
+          symbol: quantSymbol,
+          period: quantPeriod,
           initialBalance: initialCapital,
         }),
       });
 
       const data = await res.json();
       if (res.ok && data.success) {
-        setResult(data.result);
+        setQuantResult(data.result);
         soundManager.playOrderSuccess();
 
         if (data.result.netProfit > 0) {
@@ -71,7 +451,7 @@ export default function AgentPlayground() {
             spread: 70,
             origin: { y: 0.6 },
           });
-          toast.success(`Agent Simulation Complete! Net Profit: +₹${data.result.netProfit.toLocaleString('en-IN')}`, {
+          toast.success(`Simulation Complete! Net Profit: +₹${data.result.netProfit.toLocaleString('en-IN')}`, {
             description: `Win Rate: ${data.result.winRate}% across ${data.result.totalTrades} trades.`,
           });
         } else {
@@ -79,13 +459,13 @@ export default function AgentPlayground() {
         }
       } else {
         soundManager.playOrderCancel();
-        toast.error('Simulation Failed', { description: data.error || 'Check your agent script logic' });
+        toast.error('Simulation Failed', { description: data.error || 'Check your strategy script syntax' });
       }
     } catch {
       soundManager.playOrderCancel();
       toast.error('Agent execution error. Please retry.');
     } finally {
-      setLoading(false);
+      setQuantLoading(false);
     }
   };
 
@@ -96,380 +476,1228 @@ export default function AgentPlayground() {
     setTimeout(() => setIsCopied(false), 2000);
   };
 
-  const isProfitable = (result?.netProfit ?? 0) >= 0;
+  const isProfitable = (quantResult?.netProfit ?? 0) >= 0;
 
   return (
     <div className="min-h-screen bg-[#0a0e17] text-slate-100">
-      <Sidebar
-        isOpen={mobileSidebarOpen}
-        onClose={() => setMobileSidebarOpen(false)}
-      />
+      <Sidebar isOpen={mobileSidebarOpen} onClose={() => setMobileSidebarOpen(false)} />
       <TopNav onToggleMobileSidebar={() => setMobileSidebarOpen(!mobileSidebarOpen)} />
 
       <main className="md:ml-64 pt-24 pb-16 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4 bg-gradient-to-r from-blue-950/60 via-slate-900 to-indigo-950/40 p-6 rounded-2xl border border-blue-500/30 shadow-2xl">
+        {/* Header Ribbon */}
+        <div className="mb-6 flex flex-col md:flex-row md:items-center justify-between gap-4 bg-gradient-to-r from-blue-950/70 via-slate-900 to-indigo-950/50 p-6 rounded-2xl border border-blue-500/30 shadow-2xl">
           <div>
-            <div className="flex items-center gap-2 mb-1">
-              <span className="text-xs font-mono font-bold px-2 py-0.5 rounded bg-blue-500/20 text-blue-400 border border-blue-500/30 flex items-center gap-1">
+            <div className="flex items-center gap-2 mb-1 flex-wrap">
+              <span className="text-[11px] font-mono font-bold px-2 py-0.5 rounded bg-blue-500/20 text-blue-400 border border-blue-500/30 flex items-center gap-1">
                 <Sparkles className="w-3 h-3 text-yellow-400" />
-                HACKOCTOBER MLH X TECH4HACK AI TRACK
+                HACKOCTOBER MLH X TECH4HACK
               </span>
               <span className="text-slate-500">•</span>
-              <span className="text-xs text-slate-400">Algorithmic Sandbox</span>
+              <span className="text-xs text-slate-400">Autonomous Agent Playground</span>
+              <span className="text-slate-500">•</span>
+              {ollamaStatus.connected ? (
+                <span className="text-[11px] font-mono font-bold px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  Ollama Local Active ({ollamaStatus.models.length} Models)
+                </span>
+              ) : (
+                <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700 flex items-center gap-1">
+                  Multi-LLM Enabled
+                </span>
+              )}
             </div>
             <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white flex items-center gap-2.5">
-              <span>AI Agent Trading Playground</span>
+              <span>AI Agent Studio &amp; Quant Sandbox</span>
               <Bot className="w-7 h-7 text-blue-400" />
             </h1>
             <p className="text-xs sm:text-sm text-slate-400 mt-1 max-w-2xl">
-              Write, test, and backtest autonomous AI trading agents against real-time Indian and global market data.
+              Build your own autonomous trading agents using <strong className="text-white">Ollama (100% Free &amp; Local)</strong>, OpenAI, Claude, Gemini, Groq, or OpenRouter with full technical indicator context.
             </p>
           </div>
 
-          <button
-            onClick={handleRunSimulation}
-            disabled={loading}
-            className={`px-6 py-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-emerald-600/30 active:scale-95 transition-all flex items-center gap-2 self-start md:self-auto ${
-              loading ? 'opacity-70 cursor-not-allowed' : ''
-            }`}
-          >
-            {loading ? (
-              <>
-                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                <span>Simulating Strategy...</span>
-              </>
-            ) : (
-              <>
-                <Play className="w-4 h-4 fill-white" />
-                <span>Run Agent Simulation</span>
-              </>
-            )}
-          </button>
-        </div>
-
-        {/* Template Selector & Config Bar */}
-        <div className="mb-6 grid grid-cols-1 md:grid-cols-4 gap-3 bg-slate-900/70 border border-slate-800/80 p-4 rounded-2xl shadow-lg">
-          <div>
-            <label className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block mb-1.5">
-              Agent Strategy Template
-            </label>
-            <select
-              value={selectedTemplate}
-              onChange={(e) => handleSelectTemplate(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 text-white text-xs rounded-xl px-3 py-2 outline-none"
+          {/* Mode Switcher Tabs */}
+          <div className="flex items-center p-1 bg-slate-950/90 border border-slate-800 rounded-xl self-start md:self-auto shadow-inner">
+            <button
+              onClick={() => setPlaygroundMode('LLM_AGENTS')}
+              className={`px-3.5 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                playgroundMode === 'LLM_AGENTS'
+                  ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30'
+                  : 'text-slate-400 hover:text-white'
+              }`}
             >
-              {AGENT_TEMPLATES.map((tmpl) => (
-                <option key={tmpl.id} value={tmpl.id}>
-                  {tmpl.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block mb-1.5">
-              Target Instrument
-            </label>
-            <select
-              value={symbol}
-              onChange={(e) => setSymbol(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 text-white text-xs font-mono rounded-xl px-3 py-2 outline-none"
+              <Bot className="w-3.5 h-3.5" />
+              <span>Custom AI Agents</span>
+            </button>
+            <button
+              onClick={() => setPlaygroundMode('QUANT_CODE')}
+              className={`px-3.5 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                playgroundMode === 'QUANT_CODE'
+                  ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30'
+                  : 'text-slate-400 hover:text-white'
+              }`}
             >
-              <option value="RELIANCE.NS">RELIANCE.NS (Reliance)</option>
-              <option value="TCS.NS">TCS.NS (Tata Consultancy)</option>
-              <option value="HDFCBANK.NS">HDFCBANK.NS (HDFC Bank)</option>
-              <option value="INFY.NS">INFY.NS (Infosys)</option>
-              <option value="NVDA">NVDA (NVIDIA)</option>
-              <option value="AAPL">AAPL (Apple)</option>
-              <option value="TSLA">TSLA (Tesla)</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block mb-1.5">
-              Backtest Timeframe
-            </label>
-            <select
-              value={period}
-              onChange={(e) => setPeriod(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 text-white text-xs font-mono rounded-xl px-3 py-2 outline-none"
+              <Code2 className="w-3.5 h-3.5" />
+              <span>Quant Script Sandbox</span>
+            </button>
+            <button
+              onClick={() => setPlaygroundMode('API_DOCS')}
+              className={`px-3.5 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                playgroundMode === 'API_DOCS'
+                  ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30'
+                  : 'text-slate-400 hover:text-white'
+              }`}
             >
-              <option value="1w">1 Week (High Frequency)</option>
-              <option value="1mo">1 Month (Swing Trading)</option>
-              <option value="3mo">3 Months (Medium Term)</option>
-              <option value="1y">1 Year (Long Term Trend)</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block mb-1.5">
-              Initial Paper Capital (₹)
-            </label>
-            <input
-              type="number"
-              step="10000"
-              value={initialCapital}
-              onChange={(e) => setInitialCapital(parseInt(e.target.value) || 100000)}
-              className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 text-white text-xs font-mono rounded-xl px-3 py-2 outline-none"
-            />
+              <Terminal className="w-3.5 h-3.5" />
+              <span>Python Bot API</span>
+            </button>
           </div>
         </div>
 
-        {/* 2-Column Playground: Editor (Left) & Results/Console (Right) */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* Left Column: Code Editor (7 cols) */}
-          <div className="lg:col-span-7 bg-[#0d1424] border border-slate-800/90 rounded-2xl p-5 shadow-2xl flex flex-col justify-between">
-            <div>
-              <div className="flex items-center justify-between pb-3 mb-3 border-b border-slate-800/80">
-                <div className="flex items-center gap-2">
-                  <Code2 className="w-4 h-4 text-blue-400" />
-                  <span className="text-xs font-bold text-white font-mono">strategy.ts (JavaScript/TypeScript)</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={handleCopyCode}
-                    className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors text-xs flex items-center gap-1 font-mono"
-                    title="Copy code"
-                  >
-                    {isCopied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                    <span>{isCopied ? 'Copied' : 'Copy'}</span>
-                  </button>
-                  <button
-                    onClick={() => handleSelectTemplate(selectedTemplate)}
-                    className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors text-xs flex items-center gap-1 font-mono"
-                    title="Reset to template default"
-                  >
-                    <RotateCcw className="w-3.5 h-3.5" />
-                    <span>Reset</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Code Textarea Editor */}
-              <div className="relative font-mono text-xs">
-                <textarea
-                  value={code}
-                  onChange={(e) => setCode(e.target.value)}
-                  rows={20}
-                  className="w-full bg-slate-950/90 border border-slate-800 focus:border-blue-500/80 rounded-xl p-4 text-emerald-300 font-mono text-xs outline-none leading-relaxed resize-y selection:bg-blue-600"
-                  spellCheck={false}
-                />
-              </div>
-
-              <div className="mt-3 p-3 bg-slate-950/50 rounded-xl border border-slate-800/60 text-[11px] text-slate-400 font-mono">
-                <span className="text-blue-400 font-bold block mb-1">Available Context Variables:</span>
-                <span className="text-slate-300">
-                  `candle` (open, high, low, close, volume) • `indicators` (rsi, macd, ema20, bollinger) • `balance` • `holding` • `buy(qty, reason)` • `sell(qty, reason)`
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Right Column: Performance Analytics & Console (5 cols) */}
-          <div className="lg:col-span-5 flex flex-col gap-6">
-            {/* KPI Performance Cards */}
-            <div className="bg-slate-900/70 border border-slate-800/80 rounded-2xl p-5 shadow-xl">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-4 flex items-center gap-2">
-                <Activity className="w-4 h-4 text-blue-400" />
-                Backtest Performance Scorecard
-              </h3>
-
-              {result ? (
-                <div className="space-y-4">
-                  <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between">
-                    <div>
-                      <span className="text-[11px] text-slate-400 uppercase font-bold">Net P&L Return</span>
-                      <div className={`text-2xl font-black font-mono ${isProfitable ? 'text-emerald-400' : 'text-rose-400'}`}>
-                        {isProfitable ? '+' : ''}₹{result.netProfit.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                      </div>
+        {/* ============================================================== */}
+        {/* MODE 1: CUSTOM AI AGENT STUDIO (Ollama + Multi-Provider LLMs)  */}
+        {/* ============================================================== */}
+        {playgroundMode === 'LLM_AGENTS' && (
+          <div className="space-y-6">
+            {/* Ollama Local Detection Banner */}
+            {ollamaStatus.connected ? (
+              <div className="bg-emerald-950/30 border border-emerald-500/30 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 rounded-xl bg-emerald-500/20 text-emerald-400 text-xl">
+                    🦙
+                  </div>
+                  <div>
+                    <div className="font-bold text-emerald-400 flex items-center gap-2">
+                      <span>Local Ollama Server Running on port 11434</span>
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
                     </div>
-                    <span
-                      className={`px-2.5 py-1 rounded-xl text-xs font-mono font-bold ${
-                        isProfitable ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
+                    <div className="text-slate-400 mt-0.5">
+                      Discovered local models:{' '}
+                      <span className="font-mono text-slate-200">
+                        {ollamaStatus.models.map((m) => m.name).join(', ') || 'gemma3:1b'}
+                      </span>
+                      . Zero API keys required, completely offline &amp; private!
+                    </div>
+                  </div>
+                </div>
+                <button
+                  onClick={handleOpenCreateModal}
+                  className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl flex items-center gap-1.5 whitespace-nowrap self-start sm:self-auto shadow-md shadow-emerald-600/30 transition-all text-xs"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>New Ollama Agent</span>
+                </button>
+              </div>
+            ) : (
+              <div className="bg-blue-950/20 border border-blue-500/20 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-slate-300">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 rounded-xl bg-blue-500/10 text-blue-400 text-xl">
+                    ⚡
+                  </div>
+                  <div>
+                    <div className="font-bold text-white">
+                      Connect any AI: Ollama, OpenAI, Claude, Gemini, Groq, or OpenRouter
+                    </div>
+                    <div className="text-slate-400 mt-0.5">
+                      Run locally with <code className="text-blue-300">ollama run llama3.2</code> or enter your provider API key. Keys remain securely in your browser&apos;s localStorage.
+                    </div>
+                  </div>
+                </div>
+                <button
+                  onClick={handleOpenCreateModal}
+                  className="px-3.5 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl flex items-center gap-1.5 whitespace-nowrap self-start sm:self-auto shadow-md shadow-blue-600/30 transition-all text-xs"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Create Custom Agent</span>
+                </button>
+              </div>
+            )}
+
+            {/* Agent Selector Carousel / Cards */}
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
+                  <Bot className="w-4 h-4 text-blue-400" />
+                  <span>Choose Active Trading Agent ({agents.length})</span>
+                </h3>
+                <button
+                  onClick={handleOpenCreateModal}
+                  className="text-xs font-bold text-blue-400 hover:text-blue-300 flex items-center gap-1"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Create Agent</span>
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3.5">
+                {agents.map((agent) => {
+                  const isActive = agent.id === activeAgentId;
+                  const providerMeta = PROVIDER_METADATA[agent.provider];
+                  const hasKey = agent.provider === 'ollama' || Boolean(agent.apiKey);
+
+                  return (
+                    <div
+                      key={agent.id}
+                      onClick={() => setActiveAgentId(agent.id)}
+                      className={`relative cursor-pointer p-4 rounded-2xl border transition-all text-left flex flex-col justify-between ${
+                        isActive
+                          ? 'bg-blue-950/40 border-blue-500 shadow-xl shadow-blue-500/10 ring-1 ring-blue-500'
+                          : 'bg-slate-900/60 border-slate-800 hover:border-slate-700 hover:bg-slate-900/90'
                       }`}
                     >
-                      {isProfitable ? '+' : ''}{result.netProfitPercent}%
-                    </span>
+                      <div>
+                        {/* Top line: Avatar + Provider badge + Actions */}
+                        <div className="flex items-center justify-between gap-2 mb-2.5">
+                          <div className="flex items-center gap-2">
+                            <span className="text-2xl">{agent.avatar || '🤖'}</span>
+                            <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700/80 flex items-center gap-1">
+                              <span>{providerMeta.icon}</span>
+                              <span className="uppercase font-bold">{agent.provider}</span>
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                            <button
+                              onClick={() => handleOpenEditModal(agent)}
+                              className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors"
+                              title="Edit Agent / API Key"
+                            >
+                              <Settings2 className="w-3.5 h-3.5" />
+                            </button>
+                            {agent.isCustom && (
+                              <button
+                                onClick={() => handleDeleteAgent(agent.id)}
+                                className="p-1.5 text-slate-500 hover:text-rose-400 rounded-lg hover:bg-slate-800 transition-colors"
+                                title="Delete Agent"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Agent Title & Role */}
+                        <h4 className="font-bold text-white text-sm line-clamp-1">{agent.name}</h4>
+                        <div className="text-[11px] text-blue-400 font-mono mb-1.5 line-clamp-1">{agent.role}</div>
+                        <p className="text-[11px] text-slate-400 line-clamp-2 leading-relaxed mb-3">
+                          {agent.description}
+                        </p>
+                      </div>
+
+                      {/* Footer Info */}
+                      <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between text-[10px] font-mono text-slate-400">
+                        <span className="text-slate-300 truncate max-w-[120px]">{agent.model}</span>
+                        {hasKey ? (
+                          <span className="text-emerald-400 flex items-center gap-1 font-bold">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                            Ready
+                          </span>
+                        ) : (
+                          <span className="text-amber-400 flex items-center gap-1 font-bold">
+                            <Key className="w-3 h-3" />
+                            Key Needed
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Active Agent Control & Evaluation Deck */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+              {/* Left Column (5 cols): Active Agent Profile & Target Instrument */}
+              <div className="lg:col-span-5 bg-[#0d1424] border border-slate-800/90 rounded-2xl p-5 shadow-2xl flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between pb-3 mb-4 border-b border-slate-800/80">
+                    <div className="flex items-center gap-2.5">
+                      <span className="text-2xl">{activeAgent.avatar}</span>
+                      <div>
+                        <h3 className="text-sm font-bold text-white">{activeAgent.name}</h3>
+                        <span className="text-[11px] text-blue-400 font-mono">{activeAgent.role}</span>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleOpenEditModal(activeAgent)}
+                      className="px-2.5 py-1 text-[11px] font-mono text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-800 rounded-lg border border-slate-700 transition-colors flex items-center gap-1"
+                    >
+                      <Settings2 className="w-3 h-3" />
+                      <span>Config</span>
+                    </button>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3 text-xs font-mono">
-                    <div className="p-3 bg-slate-950 rounded-xl border border-slate-800">
-                      <span className="text-slate-400 text-[10px] block mb-1">Win Rate</span>
-                      <span className="text-lg font-bold text-white">{result.winRate}%</span>
-                      <span className="text-[10px] text-slate-500 block">
-                        ({result.winningTrades}W / {result.losingTrades}L)
+                  {/* Instrument Selector */}
+                  <div className="mb-4">
+                    <label className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block mb-1.5">
+                      Target Market Instrument
+                    </label>
+                    <select
+                      value={evalSymbol}
+                      onChange={(e) => setEvalSymbol(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 text-white text-xs font-mono rounded-xl px-3.5 py-2.5 outline-none font-bold"
+                    >
+                      <option value="RELIANCE.NS">RELIANCE.NS — Reliance Industries Ltd.</option>
+                      <option value="TCS.NS">TCS.NS — Tata Consultancy Services</option>
+                      <option value="HDFCBANK.NS">HDFCBANK.NS — HDFC Bank Ltd.</option>
+                      <option value="INFY.NS">INFY.NS — Infosys Ltd.</option>
+                      <option value="SBIN.NS">SBIN.NS — State Bank of India</option>
+                      <option value="ITC.NS">ITC.NS — ITC Ltd.</option>
+                      <option value="TATAMOTORS.NS">TATAMOTORS.NS — Tata Motors Ltd.</option>
+                      <option value="NVDA">NVDA — NVIDIA Corporation</option>
+                      <option value="AAPL">AAPL — Apple Inc.</option>
+                    </select>
+                  </div>
+
+                  {/* Agent Parameters Grid */}
+                  <div className="grid grid-cols-2 gap-2.5 mb-4 text-xs font-mono">
+                    <div className="p-3 bg-slate-950/70 rounded-xl border border-slate-800/80">
+                      <span className="text-[10px] text-slate-400 block mb-0.5">AI Engine</span>
+                      <span className="font-bold text-white flex items-center gap-1 truncate">
+                        <span>{PROVIDER_METADATA[activeAgent.provider].icon}</span>
+                        <span>{activeAgent.provider}</span>
                       </span>
                     </div>
 
-                    <div className="p-3 bg-slate-950 rounded-xl border border-slate-800">
-                      <span className="text-slate-400 text-[10px] block mb-1">Total Trades</span>
-                      <span className="text-lg font-bold text-white">{result.totalTrades}</span>
-                      <span className="text-[10px] text-slate-500 block">Roundtrips</span>
+                    <div className="p-3 bg-slate-950/70 rounded-xl border border-slate-800/80">
+                      <span className="text-[10px] text-slate-400 block mb-0.5">Model</span>
+                      <span className="font-bold text-blue-400 truncate block">{activeAgent.model}</span>
                     </div>
 
-                    <div className="p-3 bg-slate-950 rounded-xl border border-slate-800">
-                      <span className="text-slate-400 text-[10px] block mb-1">Max Drawdown</span>
-                      <span className="text-lg font-bold text-rose-400">-{result.maxDrawdown}%</span>
-                      <span className="text-[10px] text-slate-500 block">Peak to Trough</span>
+                    <div className="p-3 bg-slate-950/70 rounded-xl border border-slate-800/80">
+                      <span className="text-[10px] text-slate-400 block mb-0.5">Max Trade Risk</span>
+                      <span className="font-bold text-amber-400">{activeAgent.maxRiskPerTradePercent}% Capital</span>
                     </div>
 
-                    <div className="p-3 bg-slate-950 rounded-xl border border-slate-800">
-                      <span className="text-slate-400 text-[10px] block mb-1">Sharpe Ratio</span>
-                      <span className="text-lg font-bold text-blue-400">{result.sharpeRatio}</span>
-                      <span className="text-[10px] text-slate-500 block">Risk-adjusted</span>
+                    <div className="p-3 bg-slate-950/70 rounded-xl border border-slate-800/80">
+                      <span className="text-[10px] text-slate-400 block mb-0.5">Paper Capital</span>
+                      <span className="font-bold text-emerald-400">
+                        ₹{portfolioBalance.toLocaleString('en-IN', { maximumFractionDigits: 0 })}
+                      </span>
                     </div>
                   </div>
-                </div>
-              ) : (
-                <div className="py-12 text-center text-xs text-slate-400 border border-dashed border-slate-800 rounded-xl">
-                  <Cpu className="w-8 h-8 text-slate-600 mx-auto mb-2" />
-                  <span>Click &quot;Run Agent Simulation&quot; to compile and backtest your strategy.</span>
-                </div>
-              )}
-            </div>
 
-            {/* Output Tabs: Console vs Trades vs API */}
-            <div className="flex-1 bg-slate-900/70 border border-slate-800/80 rounded-2xl p-5 shadow-xl flex flex-col justify-between">
-              <div>
-                <div className="flex items-center gap-2 border-b border-slate-800 pb-3 mb-3">
-                  <button
-                    onClick={() => setActiveTab('CONSOLE')}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold font-mono transition-all ${
-                      activeTab === 'CONSOLE'
-                        ? 'bg-blue-600 text-white'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    Console Output
-                  </button>
-                  <button
-                    onClick={() => setActiveTab('TRADES')}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold font-mono transition-all ${
-                      activeTab === 'TRADES'
-                        ? 'bg-blue-600 text-white'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    Trade Ledger ({result?.trades.length || 0})
-                  </button>
-                  <button
-                    onClick={() => setActiveTab('API')}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold font-mono transition-all ${
-                      activeTab === 'API'
-                        ? 'bg-blue-600 text-white'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    Python API
-                  </button>
+                  {/* System Persona Snippet */}
+                  <div className="p-3 bg-slate-950/50 rounded-xl border border-slate-800/60 text-[11px] text-slate-400 font-mono mb-4">
+                    <span className="text-slate-300 font-bold block mb-1">Agent Directive:</span>
+                    <p className="line-clamp-4 leading-relaxed text-slate-400">
+                      {activeAgent.systemPrompt}
+                    </p>
+                  </div>
                 </div>
 
-                {/* Tab 1: Terminal Console */}
-                {activeTab === 'CONSOLE' && (
-                  <div className="h-60 overflow-y-auto bg-slate-950 rounded-xl p-3 font-mono text-[11px] text-slate-300 space-y-1.5 border border-slate-800/80">
-                    {result?.logs && result.logs.length > 0 ? (
-                      result.logs.map((logLine, idx) => (
-                        <div
-                          key={idx}
-                          className={
-                            logLine.includes('BUY')
-                              ? 'text-emerald-400 font-semibold'
-                              : logLine.includes('SELL')
-                              ? 'text-rose-400 font-semibold'
-                              : logLine.includes('ERROR')
-                              ? 'text-red-400'
-                              : 'text-slate-400'
-                          }
-                        >
-                          {logLine}
-                        </div>
-                      ))
-                    ) : (
-                      <div className="text-slate-500 py-16 text-center">
-                        Terminal logs will stream here during agent simulation.
-                      </div>
+                {/* Big Evaluate Action Button */}
+                <button
+                  onClick={handleRunAgentEvaluation}
+                  disabled={evaluating}
+                  className={`w-full py-3.5 bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-500 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-blue-600/30 active:scale-95 transition-all flex items-center justify-center gap-2 ${
+                    evaluating ? 'opacity-70 cursor-not-allowed' : ''
+                  }`}
+                >
+                  {evaluating ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      <span>{activeAgent.name} is reasoning over indicators...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Zap className="w-4 h-4 fill-white" />
+                      <span>Evaluate Market with {activeAgent.name}</span>
+                    </>
+                  )}
+                </button>
+              </div>
+
+              {/* Right Column (7 cols): Live Evaluation Signal & Trade Execution Desk */}
+              <div className="lg:col-span-7 bg-slate-900/70 border border-slate-800/90 rounded-2xl p-5 shadow-2xl flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between pb-3 mb-4 border-b border-slate-800/80">
+                    <div className="flex items-center gap-2">
+                      <Activity className="w-4 h-4 text-blue-400" />
+                      <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                        AI Quantitative Signal &amp; Decision Card
+                      </span>
+                    </div>
+                    {decision?.executionTimeMs && (
+                      <span className="text-[10px] font-mono text-slate-400 flex items-center gap-1">
+                        <Clock className="w-3 h-3 text-slate-500" />
+                        <span>Latency: {decision.executionTimeMs}ms</span>
+                      </span>
                     )}
                   </div>
-                )}
 
-                {/* Tab 2: Trades Log */}
-                {activeTab === 'TRADES' && (
-                  <div className="h-60 overflow-y-auto divide-y divide-slate-800/60 font-mono text-xs">
-                    {result?.trades && result.trades.length > 0 ? (
-                      result.trades.map((tr, idx) => (
-                        <div key={idx} className="py-2.5 flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <span
-                              className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                                tr.type === 'BUY'
-                                  ? 'bg-emerald-500/20 text-emerald-400'
-                                  : 'bg-rose-500/20 text-rose-400'
-                              }`}
-                            >
-                              {tr.type}
-                            </span>
-                            <div>
-                              <div className="text-white font-bold">
-                                {tr.quantity} @ ₹{tr.price.toFixed(2)}
-                              </div>
-                              <div className="text-[10px] text-slate-500">{tr.reason}</div>
+                  {decision ? (
+                    <div className="space-y-4">
+                      {/* Big Action Badge & Confidence Header */}
+                      <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                          <span
+                            className={`px-4 py-2 rounded-xl text-base font-black font-mono tracking-wider flex items-center gap-2 shadow-lg ${
+                              decision.action === 'BUY'
+                                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 shadow-emerald-500/10'
+                                : decision.action === 'SELL'
+                                ? 'bg-rose-500/20 text-rose-400 border border-rose-500/40 shadow-rose-500/10'
+                                : 'bg-amber-500/20 text-amber-400 border border-amber-500/40 shadow-amber-500/10'
+                            }`}
+                          >
+                            <span className="w-2.5 h-2.5 rounded-full bg-current animate-pulse" />
+                            {decision.action} SIGNAL
+                          </span>
+                          <div>
+                            <div className="text-white font-bold text-sm">
+                              {evalSymbol} @ ₹{(decisionQuote?.price || 0).toFixed(2)}
+                            </div>
+                            <div className="text-[11px] text-slate-400 font-mono">
+                              Horizon: {decision.timeframe || 'Intraday'}
                             </div>
                           </div>
-                          <div className="text-right">
-                            {tr.pnl !== undefined && (
-                              <div
-                                className={`font-bold ${
-                                  tr.pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'
-                                }`}
-                              >
-                                {tr.pnl >= 0 ? '+' : ''}₹{tr.pnl.toFixed(2)}
-                              </div>
-                            )}
-                            <div className="text-[10px] text-slate-500">{tr.time}</div>
+                        </div>
+
+                        <div className="text-right">
+                          <div className="text-[10px] text-slate-400 font-mono uppercase font-bold">Model Confidence</div>
+                          <div className="text-xl font-black font-mono text-blue-400">
+                            {decision.confidence}%
                           </div>
                         </div>
-                      ))
-                    ) : (
-                      <div className="text-slate-500 py-16 text-center">
-                        No trades executed in this run.
                       </div>
-                    )}
-                  </div>
-                )}
 
-                {/* Tab 3: Python / LangChain Bot API Integration */}
-                {activeTab === 'API' && (
-                  <div className="h-60 overflow-y-auto bg-slate-950 rounded-xl p-3 font-mono text-[11px] text-slate-300 space-y-2 border border-slate-800/80">
-                    <span className="text-blue-400 font-bold block">Connect External Python / LangChain Bot:</span>
-                    <pre className="text-slate-400 overflow-x-auto text-[10px]">
-{`import requests
+                      {/* Trade Parameters Grid */}
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs font-mono">
+                        <div className="p-3 bg-slate-950 rounded-xl border border-slate-800">
+                          <span className="text-[10px] text-slate-400 block mb-0.5">Target Price</span>
+                          <span className="text-base font-bold text-emerald-400">
+                            ₹{Number(decision.targetPrice).toFixed(2)}
+                          </span>
+                        </div>
 
-# 1. Fetch AI Indicators
-res = requests.get("http://localhost:3000/api/ai/analyze?symbol=RELIANCE.NS")
-data = res.json()
-print("Sentiment:", data["aiAnalysis"]["verdict"])
+                        <div className="p-3 bg-slate-950 rounded-xl border border-slate-800">
+                          <span className="text-[10px] text-slate-400 block mb-0.5">Stop Loss</span>
+                          <span className="text-base font-bold text-rose-400">
+                            ₹{Number(decision.stopLoss).toFixed(2)}
+                          </span>
+                        </div>
 
-# 2. Execute Automated Paper Trade
-trade = requests.post(
-    "http://localhost:3000/api/agents/trade",
-    json={
-        "symbol": "RELIANCE.NS",
-        "quantity": 25,
-        "side": "BUY",
-        "agentName": "MyPythonBot",
-        "reason": "LangChain Bullish Signal"
-    }
-)
-print("Trade Result:", trade.json())`}
-                    </pre>
+                        <div className="p-3 bg-slate-950 rounded-xl border border-slate-800">
+                          <span className="text-[10px] text-slate-400 block mb-0.5">Suggested Qty</span>
+                          <span className="text-base font-bold text-white">
+                            {decision.recommendedQuantity} shares
+                          </span>
+                        </div>
+
+                        <div className="p-3 bg-slate-950 rounded-xl border border-slate-800">
+                          <span className="text-[10px] text-slate-400 block mb-0.5">Risk / Reward</span>
+                          <span className="text-base font-bold text-blue-400">
+                            {decision.riskRewardRatio || '1:2.0'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Agent Reasoning & Technical Thesis */}
+                      <div className="p-4 bg-slate-950/80 rounded-xl border border-slate-800/80 space-y-2">
+                        <div className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                          <Bot className="w-3.5 h-3.5 text-blue-400" />
+                          <span>Agent Thesis &amp; Technical Reasoning:</span>
+                        </div>
+                        <p className="text-xs text-slate-300 leading-relaxed font-sans">
+                          {decision.reasoning}
+                        </p>
+
+                        {decision.keySignals && decision.keySignals.length > 0 && (
+                          <div className="pt-2 flex items-center gap-1.5 flex-wrap">
+                            {decision.keySignals.map((sig, idx) => (
+                              <span
+                                key={idx}
+                                className="text-[10px] font-mono px-2 py-0.5 rounded bg-blue-500/10 text-blue-300 border border-blue-500/20"
+                              >
+                                ✓ {sig}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Raw LLM Output Toggle */}
+                      <div>
+                        <button
+                          onClick={() => setShowRawOutput(!showRawOutput)}
+                          className="text-[11px] font-mono text-slate-400 hover:text-white flex items-center gap-1"
+                        >
+                          {showRawOutput ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                          <span>{showRawOutput ? 'Hide' : 'Inspect'} Raw LLM Output</span>
+                        </button>
+                        {showRawOutput && (
+                          <pre className="mt-2 p-3 bg-slate-950 rounded-xl border border-slate-800 font-mono text-[10px] text-slate-400 overflow-x-auto max-h-40">
+                            {decision.rawOutput}
+                          </pre>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="py-16 text-center text-xs text-slate-400 border border-dashed border-slate-800/80 rounded-xl">
+                      <Cpu className="w-10 h-10 text-slate-600 mx-auto mb-2 animate-pulse" />
+                      <div className="font-bold text-slate-300 mb-1">Agent Standing By</div>
+                      <span>
+                        Select a stock instrument and click &quot;Evaluate Market with {activeAgent.name}&quot; to generate real-time AI trading signals.
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Bottom Action: Execute in Firestore Portfolio */}
+                {decision && decision.action !== 'HOLD' && (
+                  <div className="mt-4 pt-4 border-t border-slate-800/80 flex flex-col sm:flex-row items-center justify-between gap-3">
+                    <div className="text-xs text-slate-400">
+                      Execute this recommendation directly into your live TradeSphere paper portfolio.
+                    </div>
+                    <button
+                      onClick={handleExecuteAgentOrder}
+                      disabled={executingOrder}
+                      className={`px-6 py-3 rounded-xl font-bold text-xs flex items-center gap-2 shadow-lg transition-all active:scale-95 whitespace-nowrap ${
+                        decision.action === 'BUY'
+                          ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/30'
+                          : 'bg-rose-600 hover:bg-rose-500 text-white shadow-rose-600/30'
+                      } ${executingOrder ? 'opacity-70 cursor-not-allowed' : ''}`}
+                    >
+                      {executingOrder ? (
+                        <>
+                          <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                          <span>Routing Order...</span>
+                        </>
+                      ) : (
+                        <>
+                          <ArrowRight className="w-4 h-4" />
+                          <span>Execute {decision.action} ({decision.recommendedQuantity} Shares)</span>
+                        </>
+                      )}
+                    </button>
                   </div>
                 )}
               </div>
             </div>
           </div>
-        </div>
+        )}
+
+        {/* ============================================================== */}
+        {/* MODE 2: QUANT CODE SANDBOX (JavaScript Backtester Engine)      */}
+        {/* ============================================================== */}
+        {playgroundMode === 'QUANT_CODE' && (
+          <div className="space-y-6">
+            {/* Template Selector & Config Bar */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-3 bg-slate-900/70 border border-slate-800/80 p-4 rounded-2xl shadow-lg">
+              <div>
+                <label className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block mb-1.5">
+                  Strategy Template
+                </label>
+                <select
+                  value={selectedTemplate}
+                  onChange={(e) => handleSelectTemplate(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 text-white text-xs rounded-xl px-3 py-2 outline-none"
+                >
+                  {AGENT_TEMPLATES.map((tmpl) => (
+                    <option key={tmpl.id} value={tmpl.id}>
+                      {tmpl.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block mb-1.5">
+                  Target Instrument
+                </label>
+                <select
+                  value={quantSymbol}
+                  onChange={(e) => setQuantSymbol(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 text-white text-xs font-mono rounded-xl px-3 py-2 outline-none"
+                >
+                  <option value="RELIANCE.NS">RELIANCE.NS (Reliance)</option>
+                  <option value="TCS.NS">TCS.NS (Tata Consultancy)</option>
+                  <option value="HDFCBANK.NS">HDFCBANK.NS (HDFC Bank)</option>
+                  <option value="INFY.NS">INFY.NS (Infosys)</option>
+                  <option value="NVDA">NVDA (NVIDIA)</option>
+                  <option value="AAPL">AAPL (Apple)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block mb-1.5">
+                  Backtest Timeframe
+                </label>
+                <select
+                  value={quantPeriod}
+                  onChange={(e) => setQuantPeriod(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 text-white text-xs font-mono rounded-xl px-3 py-2 outline-none"
+                >
+                  <option value="1w">1 Week (High Frequency)</option>
+                  <option value="1mo">1 Month (Swing Trading)</option>
+                  <option value="3mo">3 Months (Medium Term)</option>
+                  <option value="1y">1 Year (Long Term Trend)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-[11px] font-bold uppercase tracking-wider text-slate-400 block mb-1.5">
+                  Initial Paper Capital (₹)
+                </label>
+                <input
+                  type="number"
+                  step="10000"
+                  value={initialCapital}
+                  onChange={(e) => setInitialCapital(parseInt(e.target.value) || 100000)}
+                  className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 text-white text-xs font-mono rounded-xl px-3 py-2 outline-none"
+                />
+              </div>
+            </div>
+
+            {/* 2-Column Code Editor & Performance Scorecard */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+              {/* Left Column: Code Editor */}
+              <div className="lg:col-span-7 bg-[#0d1424] border border-slate-800/90 rounded-2xl p-5 shadow-2xl flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between pb-3 mb-3 border-b border-slate-800/80">
+                    <div className="flex items-center gap-2">
+                      <Code2 className="w-4 h-4 text-blue-400" />
+                      <span className="text-xs font-bold text-white font-mono">strategy.ts (JavaScript/TypeScript)</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={handleCopyCode}
+                        className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors text-xs flex items-center gap-1 font-mono"
+                        title="Copy code"
+                      >
+                        {isCopied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                        <span>{isCopied ? 'Copied' : 'Copy'}</span>
+                      </button>
+                      <button
+                        onClick={() => handleSelectTemplate(selectedTemplate)}
+                        className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors text-xs flex items-center gap-1 font-mono"
+                        title="Reset to template default"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        <span>Reset</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="relative font-mono text-xs">
+                    <textarea
+                      value={code}
+                      onChange={(e) => setCode(e.target.value)}
+                      rows={18}
+                      className="w-full bg-slate-950/90 border border-slate-800 focus:border-blue-500/80 rounded-xl p-4 text-emerald-300 font-mono text-xs outline-none leading-relaxed resize-y selection:bg-blue-600"
+                      spellCheck={false}
+                    />
+                  </div>
+
+                  <div className="mt-3 p-3 bg-slate-950/50 rounded-xl border border-slate-800/60 text-[11px] text-slate-400 font-mono">
+                    <span className="text-blue-400 font-bold block mb-1">Available Context Variables:</span>
+                    <span className="text-slate-300">
+                      `candle` (open, high, low, close, volume) • `indicators` (rsi, macd, ema20, bollinger) • `balance` • `holding` • `buy(qty, reason)` • `sell(qty, reason)`
+                    </span>
+                  </div>
+                </div>
+
+                <div className="mt-4 pt-4 border-t border-slate-800/80">
+                  <button
+                    onClick={handleRunSimulation}
+                    disabled={quantLoading}
+                    className={`w-full py-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-emerald-600/30 active:scale-95 transition-all flex items-center justify-center gap-2 ${
+                      quantLoading ? 'opacity-70 cursor-not-allowed' : ''
+                    }`}
+                  >
+                    {quantLoading ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                        <span>Simulating Strategy...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Play className="w-4 h-4 fill-white" />
+                        <span>Run Quant Backtest</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {/* Right Column: Scorecard & Tabs */}
+              <div className="lg:col-span-5 flex flex-col gap-6">
+                <div className="bg-slate-900/70 border border-slate-800/80 rounded-2xl p-5 shadow-xl">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-4 flex items-center gap-2">
+                    <Activity className="w-4 h-4 text-blue-400" />
+                    Backtest Performance Scorecard
+                  </h3>
+
+                  {quantResult ? (
+                    <div className="space-y-4">
+                      <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between">
+                        <div>
+                          <span className="text-[11px] text-slate-400 uppercase font-bold">Net P&L Return</span>
+                          <div className={`text-2xl font-black font-mono ${isProfitable ? 'text-emerald-400' : 'text-rose-400'}`}>
+                            {isProfitable ? '+' : ''}₹{quantResult.netProfit.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                          </div>
+                        </div>
+                        <span
+                          className={`px-2.5 py-1 rounded-xl text-xs font-mono font-bold ${
+                            isProfitable ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
+                          }`}
+                        >
+                          {isProfitable ? '+' : ''}{quantResult.netProfitPercent}%
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3 text-xs font-mono">
+                        <div className="p-3 bg-slate-950 rounded-xl border border-slate-800">
+                          <span className="text-slate-400 text-[10px] block mb-1">Win Rate</span>
+                          <span className="text-lg font-bold text-white">{quantResult.winRate}%</span>
+                          <span className="text-[10px] text-slate-500 block">
+                            ({quantResult.winningTrades}W / {quantResult.losingTrades}L)
+                          </span>
+                        </div>
+
+                        <div className="p-3 bg-slate-950 rounded-xl border border-slate-800">
+                          <span className="text-slate-400 text-[10px] block mb-1">Total Trades</span>
+                          <span className="text-lg font-bold text-white">{quantResult.totalTrades}</span>
+                          <span className="text-[10px] text-slate-500 block">Roundtrips</span>
+                        </div>
+
+                        <div className="p-3 bg-slate-950 rounded-xl border border-slate-800">
+                          <span className="text-slate-400 text-[10px] block mb-1">Max Drawdown</span>
+                          <span className="text-lg font-bold text-rose-400">-{quantResult.maxDrawdown}%</span>
+                          <span className="text-[10px] text-slate-500 block">Peak to Trough</span>
+                        </div>
+
+                        <div className="p-3 bg-slate-950 rounded-xl border border-slate-800">
+                          <span className="text-slate-400 text-[10px] block mb-1">Sharpe Ratio</span>
+                          <span className="text-lg font-bold text-blue-400">{quantResult.sharpeRatio}</span>
+                          <span className="text-[10px] text-slate-500 block">Risk-adjusted</span>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="py-12 text-center text-xs text-slate-400 border border-dashed border-slate-800 rounded-xl">
+                      <Cpu className="w-8 h-8 text-slate-600 mx-auto mb-2" />
+                      <span>Click &quot;Run Quant Backtest&quot; to test your algorithm.</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Output Tabs: Console vs Trades */}
+                <div className="flex-1 bg-slate-900/70 border border-slate-800/80 rounded-2xl p-5 shadow-xl flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-center gap-2 border-b border-slate-800 pb-3 mb-3">
+                      <button
+                        onClick={() => setQuantTab('CONSOLE')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold font-mono transition-all ${
+                          quantTab === 'CONSOLE' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        Console Output
+                      </button>
+                      <button
+                        onClick={() => setQuantTab('TRADES')}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold font-mono transition-all ${
+                          quantTab === 'TRADES' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'
+                        }`}
+                      >
+                        Trade Ledger ({quantResult?.trades.length || 0})
+                      </button>
+                    </div>
+
+                    {quantTab === 'CONSOLE' && (
+                      <div className="h-48 overflow-y-auto bg-slate-950 rounded-xl p-3 font-mono text-[11px] text-slate-300 space-y-1 border border-slate-800/80">
+                        {quantResult?.logs && quantResult.logs.length > 0 ? (
+                          quantResult.logs.map((logLine, idx) => (
+                            <div
+                              key={idx}
+                              className={
+                                logLine.includes('BUY')
+                                  ? 'text-emerald-400 font-semibold'
+                                  : logLine.includes('SELL')
+                                  ? 'text-rose-400 font-semibold'
+                                  : 'text-slate-400'
+                              }
+                            >
+                              {logLine}
+                            </div>
+                          ))
+                        ) : (
+                          <div className="text-slate-500 py-12 text-center">
+                            Console logs will stream here during execution.
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {quantTab === 'TRADES' && (
+                      <div className="h-48 overflow-y-auto divide-y divide-slate-800/60 font-mono text-xs">
+                        {quantResult?.trades && quantResult.trades.length > 0 ? (
+                          quantResult.trades.map((tr, idx) => (
+                            <div key={idx} className="py-2 flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <span
+                                  className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                    tr.type === 'BUY'
+                                      ? 'bg-emerald-500/20 text-emerald-400'
+                                      : 'bg-rose-500/20 text-rose-400'
+                                  }`}
+                                >
+                                  {tr.type}
+                                </span>
+                                <div>
+                                  <div className="text-white font-bold">
+                                    {tr.quantity} @ ₹{tr.price.toFixed(2)}
+                                  </div>
+                                  <div className="text-[10px] text-slate-500">{tr.reason}</div>
+                                </div>
+                              </div>
+                              <div className="text-right">
+                                {tr.pnl !== undefined && (
+                                  <div className={`font-bold ${tr.pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                    {tr.pnl >= 0 ? '+' : ''}₹{tr.pnl.toFixed(2)}
+                                  </div>
+                                )}
+                                <div className="text-[10px] text-slate-500">{tr.time}</div>
+                              </div>
+                            </div>
+                          ))
+                        ) : (
+                          <div className="text-slate-500 py-12 text-center">No trades executed yet.</div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ============================================================== */}
+        {/* MODE 3: PYTHON / LANGCHAIN / CREWAI AGENT API DOCS             */}
+        {/* ============================================================== */}
+        {playgroundMode === 'API_DOCS' && (
+          <div className="bg-[#0d1424] border border-slate-800/90 rounded-2xl p-6 shadow-2xl space-y-6">
+            <div>
+              <h3 className="text-base font-bold text-white flex items-center gap-2 mb-1">
+                <Terminal className="w-5 h-5 text-blue-400" />
+                <span>Programmatic AI Agent API &amp; Webhooks</span>
+              </h3>
+              <p className="text-xs text-slate-400">
+                Run external Python bots, AutoGen agents, LangChain pipelines, or CrewAI swarms that consume TradeSphere market intelligence and execute paper orders.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Box 1: Python Example */}
+              <div className="p-4 bg-slate-950 rounded-xl border border-slate-800">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-mono text-blue-400 font-bold">agent_runner.py (Python)</span>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(`import requests
+
+# 1. Fetch live technical indicator dossier
+res = requests.get("http://localhost:3000/api/ai/analyze?symbol=RELIANCE.NS")
+data = res.json()
+print("Verdict:", data["aiAnalysis"]["verdict"])
+
+# 2. Place programmatic trade order
+order = requests.post(
+    "http://localhost:3000/api/agents/trade",
+    json={
+        "symbol": "RELIANCE.NS",
+        "quantity": 10,
+        "side": "BUY",
+        "agentName": "LangChainAutonomousBot",
+        "reason": "RSI Oversold + Support Rebound"
+    }
+)
+print("Order Response:", order.json())`);
+                      toast.success('Python snippet copied!');
+                    }}
+                    className="text-[10px] font-mono text-slate-400 hover:text-white flex items-center gap-1"
+                  >
+                    <Copy className="w-3 h-3" />
+                    <span>Copy</span>
+                  </button>
+                </div>
+                <pre className="text-slate-300 font-mono text-[11px] overflow-x-auto leading-relaxed">
+{`import requests
+
+# 1. Fetch live technical indicator dossier
+res = requests.get("http://localhost:3000/api/ai/analyze?symbol=RELIANCE.NS")
+data = res.json()
+print("Verdict:", data["aiAnalysis"]["verdict"])
+
+# 2. Place programmatic trade order
+order = requests.post(
+    "http://localhost:3000/api/agents/trade",
+    json={
+        "symbol": "RELIANCE.NS",
+        "quantity": 10,
+        "side": "BUY",
+        "agentName": "LangChainAutonomousBot",
+        "reason": "RSI Oversold + Support Rebound"
+    }
+)
+print("Order Response:", order.json())`}
+                </pre>
+              </div>
+
+              {/* Box 2: Local Ollama Python Integration */}
+              <div className="p-4 bg-slate-950 rounded-xl border border-slate-800">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-mono text-emerald-400 font-bold">ollama_trading_agent.py</span>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(`import ollama
+import requests
+
+# Fetch market data from TradeSphere
+market = requests.get("http://localhost:3000/api/ai/analyze?symbol=TCS.NS").json()
+
+# Query local Ollama model
+response = ollama.chat(
+    model='gemma3:1b',
+    messages=[{
+        'role': 'user',
+        'content': f"Analyze TCS. RSI is {market['indicators']['rsi']}. Decide BUY, SELL, or HOLD in 1 sentence."
+    }]
+)
+print("Ollama Says:", response['message']['content'])`);
+                      toast.success('Ollama snippet copied!');
+                    }}
+                    className="text-[10px] font-mono text-slate-400 hover:text-white flex items-center gap-1"
+                  >
+                    <Copy className="w-3 h-3" />
+                    <span>Copy</span>
+                  </button>
+                </div>
+                <pre className="text-slate-300 font-mono text-[11px] overflow-x-auto leading-relaxed">
+{`import ollama
+import requests
+
+# Fetch market data from TradeSphere
+market = requests.get("http://localhost:3000/api/ai/analyze?symbol=TCS.NS").json()
+
+# Query local Ollama model
+response = ollama.chat(
+    model='gemma3:1b',
+    messages=[{
+        'role': 'user',
+        'content': f"Analyze TCS. RSI is {market['indicators']['rsi']}. Decide BUY, SELL, or HOLD in 1 sentence."
+    }]
+)
+print("Ollama Decision:", response['message']['content'])`}
+                </pre>
+              </div>
+            </div>
+          </div>
+        )}
       </main>
+
+      {/* ============================================================== */}
+      {/* MODAL: CREATE / EDIT CUSTOM AI AGENT                           */}
+      {/* ============================================================== */}
+      {isModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
+          <div className="bg-[#0e1626] border border-slate-700/80 rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6 shadow-2xl text-slate-100 space-y-5">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-2.5">
+                <span className="text-3xl">{formAvatar}</span>
+                <div>
+                  <h3 className="text-base font-bold text-white">
+                    {editingAgent ? `Edit Agent: ${editingAgent.name}` : 'Create Custom AI Trading Agent'}
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Configure your agent with Ollama or any AI provider API key.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsModalOpen(false)}
+                className="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800 transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Form Body */}
+            <div className="space-y-4 text-xs">
+              {/* Agent Name, Role & Avatar */}
+              <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
+                <div className="sm:col-span-2">
+                  <label className="font-bold text-slate-400 block mb-1">Avatar</label>
+                  <select
+                    value={formAvatar}
+                    onChange={(e) => setFormAvatar(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 text-xl rounded-xl p-2 text-center outline-none"
+                  >
+                    <option value="🤖">🤖</option>
+                    <option value="🦙">🦙</option>
+                    <option value="⚡">⚡</option>
+                    <option value="🛡️">🛡️</option>
+                    <option value="🏄‍♂️">🏄‍♂️</option>
+                    <option value="🧠">🧠</option>
+                    <option value="🎯">🎯</option>
+                    <option value="💎">💎</option>
+                    <option value="🦅">🦅</option>
+                  </select>
+                </div>
+
+                <div className="sm:col-span-5">
+                  <label className="font-bold text-slate-400 block mb-1">Agent Name</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Alpha Momentum Bot"
+                    value={formName}
+                    onChange={(e) => setFormName(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl px-3 py-2 text-white outline-none"
+                  />
+                </div>
+
+                <div className="sm:col-span-5">
+                  <label className="font-bold text-slate-400 block mb-1">Trading Role / Persona</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Mean Reversion Scalper"
+                    value={formRole}
+                    onChange={(e) => setFormRole(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 rounded-xl px-3 py-2 text-white outline-none"
+                  />
+                </div>
+              </div>
+
+              {/* Provider Selection */}
+              <div>
+                <label className="font-bold text-slate-400 block mb-1.5">AI Provider</label>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {(Object.keys(PROVIDER_METADATA) as AIProvider[]).map((prov) => {
+                    const meta = PROVIDER_METADATA[prov];
+                    const isSelected = formProvider === prov;
+
+                    return (
+                      <button
+                        type="button"
+                        key={prov}
+                        onClick={() => {
+                          setFormProvider(prov);
+                          setFormModel(meta.defaultModel);
+                          const savedKeys = JSON.parse(localStorage.getItem('tradesphere_api_keys') || '{}');
+                          if (savedKeys[prov]) {
+                            setFormApiKey(savedKeys[prov]);
+                          } else if (prov === 'ollama') {
+                            setFormApiKey('');
+                          }
+                        }}
+                        className={`p-2.5 rounded-xl border text-left flex items-center gap-2 transition-all ${
+                          isSelected
+                            ? 'bg-blue-600/20 border-blue-500 text-white shadow-md shadow-blue-500/10'
+                            : 'bg-slate-950/70 border-slate-800 text-slate-400 hover:bg-slate-900'
+                        }`}
+                      >
+                        <span className="text-lg">{meta.icon}</span>
+                        <div>
+                          <div className="font-bold text-[11px] leading-tight text-white">{meta.name}</div>
+                          <div className="text-[9px] text-slate-400">
+                            {meta.requiresApiKey ? 'API Key' : 'Local / Free'}
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Provider Settings (Ollama URL or API Key) */}
+              {formProvider === 'ollama' ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3.5 bg-slate-950/90 rounded-xl border border-emerald-500/30">
+                  <div>
+                    <label className="font-bold text-emerald-400 block mb-1 flex items-center gap-1">
+                      <span>🦙 Ollama Base URL</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={formOllamaUrl}
+                      onChange={(e) => setFormOllamaUrl(e.target.value)}
+                      placeholder="http://localhost:11434"
+                      className="w-full bg-slate-900 border border-slate-700 text-white font-mono text-xs rounded-xl px-3 py-2 outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="font-bold text-slate-300 block mb-1">Local Model Name</label>
+                    {ollamaStatus.models.length > 0 ? (
+                      <select
+                        value={formModel}
+                        onChange={(e) => setFormModel(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-700 text-white font-mono text-xs rounded-xl px-3 py-2 outline-none"
+                      >
+                        {ollamaStatus.models.map((m) => (
+                          <option key={m.name} value={m.name}>
+                            {m.name} {m.sizeMb ? `(${m.sizeMb}MB)` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        type="text"
+                        value={formModel}
+                        onChange={(e) => setFormModel(e.target.value)}
+                        placeholder="gemma3:1b or llama3.2"
+                        className="w-full bg-slate-900 border border-slate-700 text-white font-mono text-xs rounded-xl px-3 py-2 outline-none"
+                      />
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3.5 bg-slate-950/90 rounded-xl border border-blue-500/30">
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="font-bold text-blue-400 flex items-center gap-1">
+                        <Key className="w-3 h-3" />
+                        <span>{PROVIDER_METADATA[formProvider].name} API Key</span>
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setShowApiKey(!showApiKey)}
+                        className="text-[10px] text-slate-400 hover:text-white flex items-center gap-1"
+                      >
+                        {showApiKey ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                        <span>{showApiKey ? 'Hide' : 'Show'}</span>
+                      </button>
+                    </div>
+                    <input
+                      type={showApiKey ? 'text' : 'password'}
+                      value={formApiKey}
+                      onChange={(e) => setFormApiKey(e.target.value)}
+                      placeholder={`Enter your ${PROVIDER_METADATA[formProvider].name} key...`}
+                      className="w-full bg-slate-900 border border-slate-700 text-white font-mono text-xs rounded-xl px-3 py-2 outline-none"
+                    />
+                    <span className="text-[10px] text-slate-500 mt-1 block">
+                      🔒 Saved locally in your browser. Never committed or sent to external servers.
+                    </span>
+                  </div>
+
+                  <div>
+                    <label className="font-bold text-slate-300 block mb-1">Model Selection</label>
+                    <select
+                      value={formModel}
+                      onChange={(e) => setFormModel(e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-700 text-white font-mono text-xs rounded-xl px-3 py-2 outline-none mb-1.5"
+                    >
+                      {PROVIDER_METADATA[formProvider].suggestedModels.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.label}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      type="text"
+                      value={formModel}
+                      onChange={(e) => setFormModel(e.target.value)}
+                      placeholder="Or type custom model name..."
+                      className="w-full bg-slate-900 border border-slate-700 text-slate-400 font-mono text-[10px] rounded-lg px-2.5 py-1 outline-none"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* System Prompt */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="font-bold text-slate-400">System Prompt &amp; Decision Rules</label>
+                  <div className="flex items-center gap-1">
+                    <span className="text-[10px] text-slate-500">Preset Templates:</span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setFormPrompt(
+                          `You are an aggressive RSI and Bollinger Bands momentum scalper.\nLook for oversold bounces (<35 RSI) touching lower bands to BUY.\nLook for overbought (>65 RSI) near upper bands to SELL or take profit.\nMaintain strict 1:2.5 Risk-Reward ratios.`
+                        )
+                      }
+                      className="text-[10px] text-blue-400 hover:underline px-1"
+                    >
+                      Momentum
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setFormPrompt(
+                          `You are an institutional Risk Guardian.\nPrioritize capital preservation above all else.\nNever enter unless price is above both 20 EMA and 50 SMA with positive MACD histogram.\nIf market is choppy, recommend HOLD.`
+                        )
+                      }
+                      className="text-[10px] text-blue-400 hover:underline px-1"
+                    >
+                      Risk Officer
+                    </button>
+                  </div>
+                </div>
+                <textarea
+                  rows={4}
+                  value={formPrompt}
+                  onChange={(e) => setFormPrompt(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-slate-200 font-mono text-[11px] outline-none leading-relaxed"
+                />
+              </div>
+
+              {/* Risk Sliders */}
+              <div className="grid grid-cols-2 gap-4 pt-1">
+                <div>
+                  <div className="flex items-center justify-between mb-1 font-mono text-[11px]">
+                    <span className="text-slate-400 font-bold">Max Capital Risk / Trade</span>
+                    <span className="text-blue-400 font-bold">{formMaxRisk}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="1"
+                    max="20"
+                    value={formMaxRisk}
+                    onChange={(e) => setFormMaxRisk(Number(e.target.value))}
+                    className="w-full accent-blue-500 cursor-pointer"
+                  />
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1 font-mono text-[11px]">
+                    <span className="text-slate-400 font-bold">Temperature</span>
+                    <span className="text-blue-400 font-bold">{formTemperature}</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.05"
+                    value={formTemperature}
+                    onChange={(e) => setFormTemperature(Number(e.target.value))}
+                    className="w-full accent-blue-500 cursor-pointer"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="pt-4 border-t border-slate-800 flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setIsModalOpen(false)}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveAgent}
+                className="px-6 py-2.5 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-600/30 transition-all active:scale-95 flex items-center gap-1.5"
+              >
+                <Check className="w-4 h-4" />
+                <span>Save Agent</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
