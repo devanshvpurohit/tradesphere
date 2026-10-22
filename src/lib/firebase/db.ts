@@ -15,6 +15,7 @@ export interface PortfolioDoc {
   stockSymbol: string;
   quantity: number;
   avgPrice: number;
+  positionType?: 'LONG' | 'SHORT';
   createdAt: string;
   updatedAt: string;
 }
@@ -23,7 +24,7 @@ export interface TransactionDoc {
   id: string;
   userId: string;
   stockSymbol: string;
-  type: 'BUY' | 'SELL';
+  type: 'BUY' | 'SELL' | 'SHORT' | 'COVER';
   quantity: number;
   price: number;
   productType: string;
@@ -496,6 +497,145 @@ export class FirebaseDatabaseService {
       message: `Successfully sold ${quantity} shares of ${symbol}`,
       balance: user.balance,
       portfolio: updatedHolding,
+    };
+  }
+
+  /**
+   * Execute SHORT sell stock with atomic Firestore transaction (MIS intraday)
+   */
+  async executeShort(
+    userId: string,
+    symbol: string,
+    quantity: number,
+    price: number,
+    productType: string = 'MIS',
+    orderType: string = 'MARKET'
+  ): Promise<{ success: boolean; message: string; balance?: number; portfolio?: PortfolioDoc }> {
+    const margin = (price * quantity) / 5; // MIS 5x leverage
+    const now = new Date().toISOString();
+    const holdingId = `${userId}_${symbol}_SHORT`;
+
+    const user = await this.getUser(userId);
+    if (user.balance < margin) {
+      return { success: false, message: `Insufficient margin to short. Required ₹${margin.toFixed(2)}, Available ₹${user.balance.toFixed(2)}` };
+    }
+
+    user.balance -= margin;
+    user.updatedAt = now;
+
+    const holding: PortfolioDoc = {
+      id: holdingId,
+      userId,
+      stockSymbol: symbol,
+      quantity: -quantity,
+      avgPrice: price,
+      positionType: 'SHORT',
+      createdAt: now,
+      updatedAt: now,
+    };
+    fallbackPortfolios.set(holdingId, holding);
+
+    const txRecord: TransactionDoc = {
+      id: `tx_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      userId,
+      stockSymbol: symbol,
+      type: 'SHORT',
+      quantity,
+      price,
+      productType,
+      orderType,
+      createdAt: now,
+    };
+    fallbackTransactions.unshift(txRecord);
+
+    if (adminDb) {
+      try {
+        await adminDb.collection('users').doc(userId).set({ balance: user.balance, updatedAt: now }, { merge: true });
+        await adminDb.collection('portfolios').doc(holdingId).set(holding);
+        await adminDb.collection('transactions').doc(txRecord.id).set(txRecord);
+      } catch (e) {
+        // Fallback
+      }
+    }
+
+    realtimeDb.syncUserBalance(userId, user.balance);
+    return {
+      success: true,
+      message: `Successfully executed SHORT on ${quantity} shares of ${symbol} @ ₹${price.toFixed(2)}`,
+      balance: user.balance,
+      portfolio: holding,
+    };
+  }
+
+  /**
+   * Execute COVER (Buy to Cover) short position
+   */
+  async executeCover(
+    userId: string,
+    symbol: string,
+    quantity: number,
+    price: number,
+    productType: string = 'MIS',
+    orderType: string = 'MARKET'
+  ): Promise<{ success: boolean; message: string; balance?: number; realizedPnL?: number }> {
+    const holdingId = `${userId}_${symbol}_SHORT`;
+    const holding = fallbackPortfolios.get(holdingId);
+    const shortQty = holding ? Math.abs(holding.quantity) : 0;
+
+    if (!holding || shortQty <= 0) {
+      return { success: false, message: `No active short position found for ${symbol}` };
+    }
+
+    const qtyToCover = Math.min(shortQty, quantity);
+    const margin = (holding.avgPrice * qtyToCover) / 5;
+    const realizedPnL = (holding.avgPrice - price) * qtyToCover;
+    const returnAmount = margin + realizedPnL;
+    const now = new Date().toISOString();
+
+    const user = await this.getUser(userId);
+    user.balance = Math.max(0, user.balance + returnAmount);
+    user.updatedAt = now;
+
+    if (shortQty === qtyToCover) {
+      fallbackPortfolios.delete(holdingId);
+    } else {
+      holding.quantity = -(shortQty - qtyToCover);
+      holding.updatedAt = now;
+    }
+
+    const txRecord: TransactionDoc = {
+      id: `tx_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      userId,
+      stockSymbol: symbol,
+      type: 'COVER',
+      quantity: qtyToCover,
+      price,
+      productType,
+      orderType,
+      createdAt: now,
+    };
+    fallbackTransactions.unshift(txRecord);
+
+    if (adminDb) {
+      try {
+        await adminDb.collection('users').doc(userId).set({ balance: user.balance, updatedAt: now }, { merge: true });
+        if (shortQty === qtyToCover) {
+          await adminDb.collection('portfolios').doc(holdingId).delete();
+        } else {
+          await adminDb.collection('portfolios').doc(holdingId).set(holding);
+        }
+        await adminDb.collection('transactions').doc(txRecord.id).set(txRecord);
+      } catch (e) {
+        // Fallback
+      }
+    }
+
+    realtimeDb.syncUserBalance(userId, user.balance);
+    return {
+      success: true,
+      message: `Successfully covered ${qtyToCover} shares of ${symbol} @ ₹${price.toFixed(2)}. Realized P&L: ${realizedPnL >= 0 ? '+' : ''}₹${realizedPnL.toFixed(2)}`,
+      balance: user.balance,
+      realizedPnL,
     };
   }
 

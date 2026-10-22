@@ -43,6 +43,7 @@ import {
   FileText,
   ShieldCheck,
   CheckCircle,
+  Globe2,
 } from 'lucide-react';
 import { AGENT_TEMPLATES, BacktestResult } from '@/lib/agents/engine';
 import {
@@ -52,10 +53,11 @@ import {
   PROVIDER_METADATA,
   PRESET_AGENTS,
 } from '@/lib/agents/customAgent';
+import { WholeMarketDesk } from '@/components/agents/WholeMarketDesk';
 
 export default function AgentPlayground() {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-  const [playgroundMode, setPlaygroundMode] = useState<'LLM_AGENTS' | 'QUANT_CODE' | 'API_DOCS'>('LLM_AGENTS');
+  const [playgroundMode, setPlaygroundMode] = useState<'WHOLE_MARKET' | 'LLM_AGENTS' | 'QUANT_CODE' | 'API_DOCS'>('WHOLE_MARKET');
 
   // ==========================================
   // LLM AGENT STUDIO STATE
@@ -738,7 +740,18 @@ Strictly return your final decision as a JSON object.`
             </button>
 
             {/* Mode Switcher Tabs */}
-            <div className="flex items-center p-1 bg-slate-950/90 border border-slate-800 rounded-xl shadow-inner">
+            <div className="flex flex-wrap items-center p-1 bg-slate-950/90 border border-slate-800 rounded-xl shadow-inner gap-1">
+              <button
+                onClick={() => setPlaygroundMode('WHOLE_MARKET')}
+                className={`px-3.5 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                  playgroundMode === 'WHOLE_MARKET'
+                    ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 shadow-md shadow-emerald-500/25 font-black'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Globe2 className="w-3.5 h-3.5" />
+                <span>Whole-Market Desk (Full Day)</span>
+              </button>
               <button
                 onClick={() => setPlaygroundMode('LLM_AGENTS')}
                 className={`px-3.5 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
@@ -775,6 +788,17 @@ Strictly return your final decision as a JSON object.`
             </div>
           </div>
         </div>
+
+        {/* ============================================================== */}
+        {/* MODE 0: WHOLE-MARKET FULL-DAY AUTONOMOUS QUANT DESK            */}
+        {/* ============================================================== */}
+        {playgroundMode === 'WHOLE_MARKET' && (
+          <div className="space-y-6">
+            <WholeMarketDesk
+              systemPrompt={activeAgent?.systemPrompt}
+            />
+          </div>
+        )}
 
         {/* ============================================================== */}
         {/* MODE 1: CUSTOM AI AGENT STUDIO (Ollama + Multi-Provider LLMs)  */}

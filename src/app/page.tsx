@@ -7,6 +7,7 @@ import { soundManager } from '@/lib/sound';
 import confetti from 'canvas-confetti';
 import { VideoDemoModal } from '@/components/video/VideoDemoModal';
 import TradingModal from '@/components/TradingModal';
+import { WholeMarketDesk } from '@/components/agents/WholeMarketDesk';
 import {
   TrendingUp,
   TrendingDown,
@@ -97,6 +98,7 @@ export default function Home() {
   });
 
   // AI Agent Broker State
+  const [agentDeskMode, setAgentDeskMode] = useState<'WHOLE_MARKET' | 'SINGLE_SCRIP'>('WHOLE_MARKET');
   const [activeModel, setActiveModel] = useState('gemma3:1b');
   const [activeProvider, setActiveProvider] = useState<'ollama' | 'groq' | 'openai' | 'claude' | 'gemini'>('ollama');
   const [systemPrompt, setSystemPrompt] = useState(PRESET_SYSTEM_PROMPTS[0].prompt);
@@ -614,7 +616,41 @@ export default function Home() {
 
       {/* 2. AUTONOMOUS AI AGENT BROKER COCKPIT */}
       <section className="py-12 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto relative z-10">
-        <div className="p-6 sm:p-8 rounded-3xl bg-gradient-to-b from-[#0e1626] to-[#0a0f1d] border border-blue-500/30 shadow-2xl">
+        {/* Mode Selector Tabs: Whole Market vs Single Scrip */}
+        <div className="flex flex-wrap items-center gap-3 mb-6">
+          <button
+            onClick={() => setAgentDeskMode('WHOLE_MARKET')}
+            className={`px-5 py-3 rounded-2xl text-xs sm:text-sm font-black uppercase tracking-wider transition-all flex items-center gap-2 shadow-lg ${
+              agentDeskMode === 'WHOLE_MARKET'
+                ? 'bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-600 text-slate-950 shadow-emerald-500/25 ring-2 ring-emerald-400'
+                : 'bg-slate-900/90 text-slate-400 hover:text-white border border-slate-800'
+            }`}
+          >
+            <Globe2 className="w-4 h-4" />
+            <span>Whole-Market Autonomous Desk (Full Day · 20 Stocks)</span>
+          </button>
+
+          <button
+            onClick={() => setAgentDeskMode('SINGLE_SCRIP')}
+            className={`px-5 py-3 rounded-2xl text-xs sm:text-sm font-black uppercase tracking-wider transition-all flex items-center gap-2 shadow-lg ${
+              agentDeskMode === 'SINGLE_SCRIP'
+                ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-blue-600/25 ring-2 ring-blue-400'
+                : 'bg-slate-900/90 text-slate-400 hover:text-white border border-slate-800'
+            }`}
+          >
+            <Target className="w-4 h-4" />
+            <span>Single-Stock Focus Desk ({selectedStock.replace('.NS', '')})</span>
+          </button>
+        </div>
+
+        {agentDeskMode === 'WHOLE_MARKET' ? (
+          <WholeMarketDesk
+            systemPrompt={systemPrompt}
+            decisionRules={decisionRules}
+            onTradeExecuted={() => fetchMarketPrices()}
+          />
+        ) : (
+          <div className="p-6 sm:p-8 rounded-3xl bg-gradient-to-b from-[#0e1626] to-[#0a0f1d] border border-blue-500/30 shadow-2xl">
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 pb-6 border-b border-slate-800">
             <div>
               <div className="flex items-center gap-2 mb-1.5">
@@ -876,6 +912,7 @@ export default function Home() {
             </div>
           )}
         </div>
+        )}
       </section>
 
       {/* Feature Highlights Grid */}

@@ -52,6 +52,40 @@ class TradingService {
     }
   }
 
+  async shortStock(
+    userId: string,
+    symbol: string,
+    quantity: number,
+    productType: string = 'MIS',
+    orderType: string = 'MARKET',
+    specifiedPrice?: number
+  ): Promise<TradeResult> {
+    try {
+      const stockPrice = specifiedPrice || (await marketService.getStockPrice(symbol)).price;
+      return await firebaseDb.executeShort(userId, symbol, quantity, stockPrice, productType, orderType);
+    } catch (error: any) {
+      console.error('Error shorting stock in TradingService:', error);
+      return { success: false, message: error.message || 'Failed to short stock' };
+    }
+  }
+
+  async coverStock(
+    userId: string,
+    symbol: string,
+    quantity: number,
+    productType: string = 'MIS',
+    orderType: string = 'MARKET',
+    specifiedPrice?: number
+  ): Promise<TradeResult> {
+    try {
+      const stockPrice = specifiedPrice || (await marketService.getStockPrice(symbol)).price;
+      return await firebaseDb.executeCover(userId, symbol, quantity, stockPrice, productType, orderType);
+    } catch (error: any) {
+      console.error('Error covering stock in TradingService:', error);
+      return { success: false, message: error.message || 'Failed to cover stock' };
+    }
+  }
+
   async getPortfolio(userId: string): Promise<PortfolioItemWithQuote[]> {
     const portfolios = await firebaseDb.getPortfolio(userId);
 
