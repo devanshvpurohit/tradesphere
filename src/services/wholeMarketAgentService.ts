@@ -147,21 +147,46 @@ export class WholeMarketAgentService {
             const isOverboughtExhaustion = indicators.rsi >= rsiShortThreshold;
             const isBearishTrend = indicators.macd.crossover === 'BEARISH' || quote.price < (indicators.ema20 || quote.price);
 
-            // BUY LONG setup
+            // 1. Oversold Dip Buying Setup
             if (isOversoldDip && isBullishTrend) {
               decisionAction = 'BUY';
               reasoning = `Bullish Confluence: RSI(14) at ${indicators.rsi.toFixed(1)} <= ${rsiBuyThreshold} dip + MACD/EMA bullish cross. Going Long.`;
               confidence = 88;
             }
-            // SHORT SELL setup (if allowed)
+            // 2. Momentum Breakout Buying (Price surging with bullish technicals & healthy RSI)
+            else if (quote.changePercent >= 0.4 && isBullishTrend && indicators.rsi >= 40 && indicators.rsi <= 68) {
+              decisionAction = 'BUY';
+              reasoning = `Momentum Expansion: Intraday gain +${quote.changePercent.toFixed(2)}% with price above 20 EMA. Going Long.`;
+              confidence = 82;
+            }
+            // 3. Technical Bullish Score Threshold Buying
+            else if (indicators.bullishScore >= 65 && indicators.rsi <= 58) {
+              decisionAction = 'BUY';
+              reasoning = `Bullish Bias: Technical health score ${indicators.bullishScore}/100 with RSI at ${indicators.rsi.toFixed(1)}. Buying pullback.`;
+              confidence = 80;
+            }
+            // 4. Overbought Peak Shorting (if allowed)
             else if (allowShorts && isOverboughtExhaustion && isBearishTrend) {
               decisionAction = 'SHORT';
-              reasoning = `Bearish Exhaustion: RSI(14) at ${indicators.rsi.toFixed(1)} >= ${rsiShortThreshold} peak + Bearish cross. Shorting intraday.`;
-              confidence = 84;
-            } else {
+              reasoning = `Bearish Exhaustion: RSI(14) at ${indicators.rsi.toFixed(1)} >= ${rsiShortThreshold} peak + Bearish breakdown. Shorting intraday.`;
+              confidence = 85;
+            }
+            // 5. Momentum Breakdown Shorting (Price dropping with bearish technicals)
+            else if (allowShorts && quote.changePercent <= -0.4 && isBearishTrend && indicators.rsi >= 32 && indicators.rsi <= 62) {
+              decisionAction = 'SHORT';
+              reasoning = `Breakdown Momentum: Intraday drop ${quote.changePercent.toFixed(2)}% below 20 EMA. Shorting intraday.`;
+              confidence = 80;
+            }
+            // 6. Technical Bearish Score Threshold Shorting
+            else if (allowShorts && indicators.bullishScore <= 35 && indicators.rsi >= 42) {
+              decisionAction = 'SHORT';
+              reasoning = `Bearish Bias: Technical score ${indicators.bullishScore}/100 with selling pressure. Shorting breakdown.`;
+              confidence = 78;
+            }
+            else {
               decisionAction = 'HOLD';
-              reasoning = `Market Consolidation: RSI at ${indicators.rsi.toFixed(1)}, waiting for confluence breakout.`;
-              confidence = 60;
+              reasoning = `Market Consolidation: RSI at ${indicators.rsi.toFixed(1)}, awaiting directional breakout.`;
+              confidence = 50;
             }
           }
 
@@ -178,103 +203,154 @@ export class WholeMarketAgentService {
             activePosition,
             holdingQuantity: holdingQty,
           });
-
-          // 3. Autonomously Execute Trade If Action is Triggered AND meets confidence threshold
-          const nowStr = new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' });
-          const isHighConfidence = confidence >= minConfidence;
-
-          if (decisionAction === 'BUY' && isHighConfidence) {
-            const leverageMultiplier = productType === 'MIS' ? 5 : 1;
-            const maxOrderVal = maxAllocationPerStock * leverageMultiplier;
-            const qty = Math.max(1, Math.min(25, Math.floor(maxOrderVal / quote.price)));
-            const requiredMargin = (qty * quote.price) / leverageMultiplier;
-
-            if (currentBalance >= requiredMargin) {
-              const res = await firebaseDb.executeBuy(userId, quote.symbol, qty, quote.price, productType, 'MARKET');
-              if (res.success) {
-                currentBalance = Math.max(0, currentBalance - requiredMargin);
-                executions.push({
-                  id: `exec_buy_${Date.now()}_${quote.symbol}`,
-                  timestamp: nowStr,
-                  symbol: quote.symbol,
-                  action: 'BUY',
-                  quantity: qty,
-                  price: quote.price,
-                  totalValue: qty * quote.price,
-                  marginUsed: requiredMargin,
-                  reason: reasoning,
-                  status: 'FILLED',
-                });
-              }
-            }
-          } else if (decisionAction === 'SHORT' && allowShorts && isHighConfidence) {
-            const leverageMultiplier = productType === 'MIS' ? 5 : 1;
-            const maxOrderVal = maxAllocationPerStock * leverageMultiplier;
-            const qty = Math.max(1, Math.min(20, Math.floor(maxOrderVal / quote.price)));
-            const requiredMargin = (qty * quote.price) / leverageMultiplier;
-
-            if (currentBalance >= requiredMargin) {
-              const res = await firebaseDb.executeShort(userId, quote.symbol, qty, quote.price, productType, 'MARKET');
-              if (res.success) {
-                currentBalance = Math.max(0, currentBalance - requiredMargin);
-                executions.push({
-                  id: `exec_short_${Date.now()}_${quote.symbol}`,
-                  timestamp: nowStr,
-                  symbol: quote.symbol,
-                  action: 'SHORT',
-                  quantity: qty,
-                  price: quote.price,
-                  totalValue: qty * quote.price,
-                  marginUsed: requiredMargin,
-                  reason: reasoning,
-                  status: 'FILLED',
-                });
-              }
-            }
-          } else if (decisionAction === 'SELL' && holdingQty > 0) {
-            const res = await firebaseDb.executeSell(userId, quote.symbol, holdingQty, quote.price, productType, 'MARKET');
-            if (res.success) {
-              const realizedPnL = (quote.price - (holding?.avgPrice || quote.price)) * holdingQty;
-              currentBalance += quote.price * holdingQty;
-              executions.push({
-                id: `exec_sell_${Date.now()}_${quote.symbol}`,
-                timestamp: nowStr,
-                symbol: quote.symbol,
-                action: 'SELL',
-                quantity: holdingQty,
-                price: quote.price,
-                totalValue: quote.price * holdingQty,
-                marginUsed: 0,
-                realizedPnL,
-                reason: reasoning,
-                status: 'FILLED',
-              });
-            }
-          } else if (decisionAction === 'COVER' && holdingQty > 0) {
-            const res = await firebaseDb.executeCover(userId, quote.symbol, holdingQty, quote.price, productType, 'MARKET');
-            if (res.success) {
-              const realizedPnL = ((holding?.avgPrice || quote.price) - quote.price) * holdingQty;
-              currentBalance += quote.price * holdingQty;
-              executions.push({
-                id: `exec_cover_${Date.now()}_${quote.symbol}`,
-                timestamp: nowStr,
-                symbol: quote.symbol,
-                action: 'COVER',
-                quantity: holdingQty,
-                price: quote.price,
-                totalValue: quote.price * holdingQty,
-                marginUsed: 0,
-                realizedPnL,
-                reason: reasoning,
-                status: 'FILLED',
-              });
-            }
-          }
         } catch (err) {
           // Continue scanning next stock
         }
       })
     );
+
+    // 3. Synthesize Whole-Market Telemetry with LLM (if enabled) & integrate high-conviction picks
+    let llmThesis: WholeMarketScanResult['llmThesis'] = undefined;
+    if (llmConfig?.enabled) {
+      const thesis = await this.synthesizeWholeMarketWithLLM({
+        llmConfig,
+        systemPrompt,
+        decisionRules,
+        signals,
+        balance: currentBalance,
+        openPositionsCount: holdings.length,
+      });
+
+      if (thesis) {
+        llmThesis = thesis;
+
+        // If LLM returned high-conviction picks, promote or boost them directly!
+        if (Array.isArray(thesis.highConvictionPicks) && thesis.highConvictionPicks.length > 0) {
+          const pickSet = new Set(thesis.highConvictionPicks.map((s) => s.toUpperCase()));
+          for (const sig of signals) {
+            const symUpper = sig.symbol.toUpperCase();
+            if (pickSet.has(symUpper) || pickSet.has(symUpper.replace('.NS', ''))) {
+              if (thesis.sentiment === 'BULLISH' && sig.activePosition === 'NONE') {
+                sig.signal = 'BUY';
+                sig.confidence = Math.max(90, sig.confidence + 15);
+                sig.reasoning = `🧠 LLM Endorsement: ${thesis.model} flagged as top institutional long pick (${sig.reasoning})`;
+              } else if (thesis.sentiment === 'BEARISH' && allowShorts && sig.activePosition === 'NONE') {
+                sig.signal = 'SHORT';
+                sig.confidence = Math.max(90, sig.confidence + 15);
+                sig.reasoning = `🧠 LLM Endorsement: ${thesis.model} flagged as top institutional short breakdown (${sig.reasoning})`;
+              } else {
+                sig.confidence = Math.min(98, sig.confidence + 12);
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // 4. Autonomously Execute Trades for all triggered signals meeting minConfidence
+    const nowStr = new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' });
+
+    for (const sig of signals) {
+      const isHighConfidence = sig.confidence >= minConfidence;
+      const quote = validQuotes.find((q) => q.symbol === sig.symbol);
+      if (!quote) continue;
+
+      try {
+        if (sig.signal === 'BUY' && isHighConfidence) {
+          const leverageMultiplier = productType === 'MIS' ? 5 : 1;
+          const maxOrderVal = maxAllocationPerStock * leverageMultiplier;
+          const qty = Math.max(1, Math.min(25, Math.floor(maxOrderVal / quote.price)));
+          const requiredMargin = (qty * quote.price) / leverageMultiplier;
+
+          if (currentBalance >= requiredMargin) {
+            const res = await firebaseDb.executeBuy(userId, quote.symbol, qty, quote.price, productType, 'MARKET');
+            if (res.success) {
+              currentBalance = Math.max(0, currentBalance - requiredMargin);
+              executions.push({
+                id: `exec_buy_${Date.now()}_${quote.symbol}`,
+                timestamp: nowStr,
+                symbol: quote.symbol,
+                action: 'BUY',
+                quantity: qty,
+                price: quote.price,
+                totalValue: qty * quote.price,
+                marginUsed: requiredMargin,
+                reason: sig.reasoning,
+                status: 'FILLED',
+              });
+            }
+          }
+        } else if (sig.signal === 'SHORT' && allowShorts && isHighConfidence) {
+          const leverageMultiplier = productType === 'MIS' ? 5 : 1;
+          const maxOrderVal = maxAllocationPerStock * leverageMultiplier;
+          const qty = Math.max(1, Math.min(20, Math.floor(maxOrderVal / quote.price)));
+          const requiredMargin = (qty * quote.price) / leverageMultiplier;
+
+          if (currentBalance >= requiredMargin) {
+            const res = await firebaseDb.executeShort(userId, quote.symbol, qty, quote.price, productType, 'MARKET');
+            if (res.success) {
+              currentBalance = Math.max(0, currentBalance - requiredMargin);
+              executions.push({
+                id: `exec_short_${Date.now()}_${quote.symbol}`,
+                timestamp: nowStr,
+                symbol: quote.symbol,
+                action: 'SHORT',
+                quantity: qty,
+                price: quote.price,
+                totalValue: qty * quote.price,
+                marginUsed: requiredMargin,
+                reason: sig.reasoning,
+                status: 'FILLED',
+              });
+            }
+          }
+        } else if (sig.signal === 'SELL' && (sig.holdingQuantity || 0) > 0) {
+          const holdingQty = sig.holdingQuantity || 0;
+          const holding = holdingsMap.get(sig.symbol);
+          const res = await firebaseDb.executeSell(userId, quote.symbol, holdingQty, quote.price, productType, 'MARKET');
+          if (res.success) {
+            const realizedPnL = (quote.price - (holding?.avgPrice || quote.price)) * holdingQty;
+            currentBalance += quote.price * holdingQty;
+            executions.push({
+              id: `exec_sell_${Date.now()}_${quote.symbol}`,
+              timestamp: nowStr,
+              symbol: quote.symbol,
+              action: 'SELL',
+              quantity: holdingQty,
+              price: quote.price,
+              totalValue: quote.price * holdingQty,
+              marginUsed: 0,
+              realizedPnL,
+              reason: sig.reasoning,
+              status: 'FILLED',
+            });
+          }
+        } else if (sig.signal === 'COVER' && (sig.holdingQuantity || 0) > 0) {
+          const holdingQty = sig.holdingQuantity || 0;
+          const holding = holdingsMap.get(sig.symbol);
+          const res = await firebaseDb.executeCover(userId, quote.symbol, holdingQty, quote.price, productType, 'MARKET');
+          if (res.success) {
+            const realizedPnL = ((holding?.avgPrice || quote.price) - quote.price) * holdingQty;
+            currentBalance += quote.price * holdingQty;
+            executions.push({
+              id: `exec_cover_${Date.now()}_${quote.symbol}`,
+              timestamp: nowStr,
+              symbol: quote.symbol,
+              action: 'COVER',
+              quantity: holdingQty,
+              price: quote.price,
+              totalValue: quote.price * holdingQty,
+              marginUsed: 0,
+              realizedPnL,
+              reason: sig.reasoning,
+              status: 'FILLED',
+            });
+          }
+        }
+      } catch (execErr) {
+        console.error(`Execution error for ${sig.symbol}:`, execErr);
+      }
+    }
 
     // Refresh final portfolio counts
     const updatedHoldings = await firebaseDb.getPortfolio(userId);
@@ -289,22 +365,6 @@ export class WholeMarketAgentService {
       } else if (h.quantity > 0) {
         longCount++;
         totalMargin += (h.avgPrice * h.quantity) / 5;
-      }
-    }
-
-    // 4. Synthesize Whole-Market Telemetry using LLM if enabled
-    let llmThesis: WholeMarketScanResult['llmThesis'] = undefined;
-    if (llmConfig?.enabled) {
-      const thesis = await this.synthesizeWholeMarketWithLLM({
-        llmConfig,
-        systemPrompt,
-        decisionRules,
-        signals,
-        balance: currentBalance,
-        openPositionsCount: updatedHoldings.length,
-      });
-      if (thesis) {
-        llmThesis = thesis;
       }
     }
 

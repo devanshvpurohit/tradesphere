@@ -36,6 +36,7 @@ import {
   Key,
   Eye,
   EyeOff,
+  RefreshCw,
 } from 'lucide-react';
 import {
   MarketSignalRecord,
@@ -164,6 +165,65 @@ export function WholeMarketDesk({
   const [showApiKey, setShowApiKey] = useState<boolean>(false);
   const [temperature, setTemperature] = useState<number>(0.1);
 
+  // Dynamic Models from API Key
+  const [dynamicModels, setDynamicModels] = useState<{ id: string; label: string; description?: string }[]>([]);
+  const [fetchingModels, setFetchingModels] = useState<boolean>(false);
+  const [modelFetchStatus, setModelFetchStatus] = useState<{ success: boolean; message: string } | null>(null);
+
+  const fetchModelsForProvider = async (prov: AIProvider, key?: string, url?: string) => {
+    const keyToUse = key !== undefined ? key : llmApiKey;
+    const urlToUse = url !== undefined ? url : ollamaBaseUrl;
+
+    if (prov !== 'ollama' && (!keyToUse || !keyToUse.trim())) {
+      setDynamicModels([]);
+      setModelFetchStatus({ success: false, message: `Please enter your ${prov.toUpperCase()} API key first.` });
+      return;
+    }
+
+    setFetchingModels(true);
+    setModelFetchStatus(null);
+
+    try {
+      const res = await fetch('/api/agents/provider-models', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: prov,
+          apiKey: (keyToUse || '').trim(),
+          ollamaBaseUrl: urlToUse || 'http://localhost:11434',
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success && Array.isArray(data.models) && data.models.length > 0) {
+        setDynamicModels(data.models);
+        setModelFetchStatus({
+          success: true,
+          message: `✓ Retrieved ${data.models.length} live models from your ${prov.toUpperCase()} account`,
+        });
+
+        const exists = data.models.some((m: any) => m.id === llmModel);
+        if (!exists && data.models[0]?.id) {
+          setLlmModel(data.models[0].id);
+        }
+      } else {
+        setDynamicModels([]);
+        setModelFetchStatus({
+          success: false,
+          message: data.error || `No models returned from ${prov.toUpperCase()}.`,
+        });
+      }
+    } catch (err: any) {
+      setDynamicModels([]);
+      setModelFetchStatus({
+        success: false,
+        message: err.message || 'Failed to retrieve models with this key.',
+      });
+    } finally {
+      setFetchingModels(false);
+    }
+  };
+
   // Results State
   const [scanResult, setScanResult] = useState<WholeMarketScanResult | null>(null);
   const [executionLogs, setExecutionLogs] = useState<WholeMarketExecutionItem[]>([]);
@@ -215,6 +275,18 @@ export function WholeMarketDesk({
         if (parsed.llmModel) setLlmModel(parsed.llmModel);
         if (parsed.ollamaBaseUrl) setOllamaBaseUrl(parsed.ollamaBaseUrl);
         if (typeof parsed.temperature === 'number') setTemperature(parsed.temperature);
+
+        // Fetch dynamic models if key/url present
+        const activeProv = parsed.llmProvider || llmProvider;
+        const activeKey = savedKeys[activeProv] || parsed.llmApiKey || '';
+        if (activeProv === 'ollama' || activeKey) {
+          fetchModelsForProvider(activeProv, activeKey, parsed.ollamaBaseUrl);
+        }
+      } else {
+        const defaultKey = savedKeys[llmProvider] || '';
+        if (llmProvider === 'ollama' || defaultKey) {
+          fetchModelsForProvider(llmProvider, defaultKey);
+        }
       }
     } catch (e) {
       console.warn('Failed loading whole-market custom config from localStorage:', e);
@@ -224,15 +296,18 @@ export function WholeMarketDesk({
   // Update model & API key when provider changes
   const handleSelectProvider = (prov: AIProvider) => {
     setLlmProvider(prov);
+    setDynamicModels([]);
+    setModelFetchStatus(null);
     const providerMeta = LLM_PROVIDERS.find((p) => p.id === prov);
     if (providerMeta && providerMeta.models.length > 0) {
       setLlmModel(providerMeta.models[0].id);
     }
     const savedKeys = JSON.parse(localStorage.getItem('tradesphere_api_keys') || '{}');
-    if (savedKeys[prov]) {
-      setLlmApiKey(savedKeys[prov]);
-    } else {
-      setLlmApiKey('');
+    const key = savedKeys[prov] || '';
+    setLlmApiKey(key);
+
+    if (prov === 'ollama' || key) {
+      fetchModelsForProvider(prov, key);
     }
   };
 
@@ -623,19 +698,45 @@ export function WholeMarketDesk({
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 pt-2">
                   {/* Model Selector */}
                   <div>
-                    <label className="text-[11px] font-mono text-slate-400 mb-1 block uppercase font-semibold">
-                      Model Selection
-                    </label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-[11px] font-mono text-slate-400 uppercase font-semibold">
+                        Model Selection
+                      </label>
+                      {dynamicModels.length > 0 && (
+                        <span className="text-[10px] font-mono text-emerald-400">
+                          {dynamicModels.length} dynamic models
+                        </span>
+                      )}
+                    </div>
                     <select
                       value={llmModel}
                       onChange={(e) => setLlmModel(e.target.value)}
                       className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-purple-500"
                     >
-                      {LLM_PROVIDERS.find((p) => p.id === llmProvider)?.models.map((m) => (
-                        <option key={m.id} value={m.id}>
-                          {m.name}
-                        </option>
-                      ))}
+                      {dynamicModels.length > 0 ? (
+                        <>
+                          <optgroup label={`Retrieved from Account (${dynamicModels.length})`}>
+                            {dynamicModels.map((m) => (
+                              <option key={m.id} value={m.id}>
+                                {m.label || m.id}
+                              </option>
+                            ))}
+                          </optgroup>
+                          <optgroup label="Default Recommendations">
+                            {LLM_PROVIDERS.find((p) => p.id === llmProvider)?.models.map((m) => (
+                              <option key={`def_${m.id}`} value={m.id}>
+                                {m.name}
+                              </option>
+                            ))}
+                          </optgroup>
+                        </>
+                      ) : (
+                        LLM_PROVIDERS.find((p) => p.id === llmProvider)?.models.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.name}
+                          </option>
+                        ))
+                      )}
                     </select>
                   </div>
 
@@ -645,18 +746,37 @@ export function WholeMarketDesk({
                       <label className="text-[11px] font-mono text-slate-400 mb-1 block uppercase font-semibold">
                         Ollama Base URL
                       </label>
-                      <input
-                        type="text"
-                        value={ollamaBaseUrl}
-                        onChange={(e) => setOllamaBaseUrl(e.target.value)}
-                        placeholder="http://localhost:11434"
-                        className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-purple-500"
-                      />
+                      <div className="flex gap-1.5">
+                        <input
+                          type="text"
+                          value={ollamaBaseUrl}
+                          onChange={(e) => setOllamaBaseUrl(e.target.value)}
+                          placeholder="http://localhost:11434"
+                          className="flex-1 bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-purple-500"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => fetchModelsForProvider('ollama', undefined, ollamaBaseUrl)}
+                          disabled={fetchingModels}
+                          className="px-3 py-2 bg-purple-600/30 hover:bg-purple-600 text-purple-300 hover:text-white rounded-xl text-xs font-mono font-bold flex items-center gap-1.5 transition-colors disabled:opacity-50 whitespace-nowrap"
+                          title="Query local Ollama instance for installed models"
+                        >
+                          <RefreshCw className={`w-3.5 h-3.5 ${fetchingModels ? 'animate-spin' : ''}`} />
+                          <span>{fetchingModels ? 'Querying...' : 'Fetch Models'}</span>
+                        </button>
+                      </div>
+                      {modelFetchStatus && (
+                        <div className={`text-[10px] font-mono mt-1 ${modelFetchStatus.success ? 'text-emerald-400' : 'text-rose-400'}`}>
+                          {modelFetchStatus.message}
+                        </div>
+                      )}
                     </div>
                   ) : (
                     <div>
-                      <label className="text-[11px] font-mono text-slate-400 mb-1 flex items-center justify-between uppercase font-semibold">
-                        <span>API Key ({llmProvider.toUpperCase()})</span>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-[11px] font-mono text-slate-400 uppercase font-semibold">
+                          API Key ({llmProvider.toUpperCase()})
+                        </label>
                         <button
                           type="button"
                           onClick={() => setShowApiKey((prev) => !prev)}
@@ -664,17 +784,39 @@ export function WholeMarketDesk({
                         >
                           {showApiKey ? 'Hide' : 'Show'}
                         </button>
-                      </label>
-                      <div className="relative">
-                        <Key className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
-                        <input
-                          type={showApiKey ? 'text' : 'password'}
-                          value={llmApiKey}
-                          onChange={(e) => setLlmApiKey(e.target.value)}
-                          placeholder={`Enter ${llmProvider.toUpperCase()} API key...`}
-                          className="w-full pl-9 pr-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white font-mono focus:outline-none focus:border-purple-500"
-                        />
                       </div>
+                      <div className="flex gap-1.5">
+                        <div className="relative flex-1">
+                          <Key className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                          <input
+                            type={showApiKey ? 'text' : 'password'}
+                            value={llmApiKey}
+                            onChange={(e) => setLlmApiKey(e.target.value)}
+                            onBlur={() => {
+                              if (llmApiKey.trim()) {
+                                fetchModelsForProvider(llmProvider, llmApiKey);
+                              }
+                            }}
+                            placeholder={`Enter ${llmProvider.toUpperCase()} API key...`}
+                            className="w-full pl-9 pr-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white font-mono focus:outline-none focus:border-purple-500"
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => fetchModelsForProvider(llmProvider, llmApiKey)}
+                          disabled={fetchingModels || !llmApiKey.trim()}
+                          className="px-3 py-2 bg-purple-600/30 hover:bg-purple-600 text-purple-300 hover:text-white rounded-xl text-xs font-mono font-bold flex items-center gap-1.5 transition-colors disabled:opacity-50 whitespace-nowrap"
+                          title="Retrieve model list from this API key"
+                        >
+                          <RefreshCw className={`w-3.5 h-3.5 ${fetchingModels ? 'animate-spin' : ''}`} />
+                          <span>{fetchingModels ? 'Fetching...' : 'Fetch Models'}</span>
+                        </button>
+                      </div>
+                      {modelFetchStatus && (
+                        <div className={`text-[10px] font-mono mt-1 ${modelFetchStatus.success ? 'text-emerald-400' : 'text-rose-400'}`}>
+                          {modelFetchStatus.message}
+                        </div>
+                      )}
                     </div>
                   )}
 
