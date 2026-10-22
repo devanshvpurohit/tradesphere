@@ -1,8 +1,15 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
-import { rtdb } from '@/lib/firebase/client';
-import { ref, onValue, off, query, limitToLast } from 'firebase/database';
+import { useState, useEffect } from 'react';
+import { db } from '@/lib/firebase/client';
+import {
+  doc,
+  collection,
+  query,
+  where,
+  onSnapshot,
+  limit,
+} from 'firebase/firestore';
 
 export interface RealtimeTradeEvent {
   orderId?: string;
@@ -33,130 +40,141 @@ export function useRealtimeTrading(userId: string = 'demo-user-123') {
   const [liveTrades, setLiveTrades] = useState<RealtimeTradeEvent[]>([]);
   const [isConnected, setIsConnected] = useState<boolean>(false);
   const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
-  const [lastEvent, setLastEvent] = useState<RealtimeTradeEvent | null>(null);
 
   useEffect(() => {
-    if (!rtdb || typeof window === 'undefined') {
+    if (!db || typeof window === 'undefined') {
       setIsConnected(false);
       return;
     }
 
+    const unsubscribes: (() => void)[] = [];
+
     try {
-      // 1. Listen to Realtime Balance: users/${userId}/balance
-      const balanceRef = ref(rtdb, `users/${userId}/balance`);
-      const unsubscribeBalance = onValue(
-        balanceRef,
-        (snapshot) => {
-          if (snapshot.exists()) {
-            const val = snapshot.val();
-            if (typeof val === 'number') {
-              setBalance(val);
+      // 1. Realtime Listen to User Balance: users/{userId}
+      const userDocRef = doc(db, 'users', userId);
+      const unsubUser = onSnapshot(
+        userDocRef,
+        (snap) => {
+          if (snap.exists()) {
+            const data = snap.data();
+            if (typeof data?.balance === 'number') {
+              setBalance(data.balance);
               setIsConnected(true);
               setLastSyncTime(new Date());
             }
           }
         },
         (error) => {
-          console.warn('RTDB balance listener error:', error);
+          console.warn('Firestore user balance listener warning:', error.message);
         }
       );
+      unsubscribes.push(unsubUser);
 
-      // 2. Listen to Realtime Positions: portfolios/${userId}
-      const portfolioRef = ref(rtdb, `portfolios/${userId}`);
-      const unsubscribePortfolio = onValue(
-        portfolioRef,
-        (snapshot) => {
-          if (snapshot.exists()) {
-            const data = snapshot.val();
-            const list: RealtimePositionItem[] = Object.values(data || {}).map((item: any) => ({
-              symbol: item.symbol || '',
+      // 2. Realtime Listen to User Portfolio: portfolios where userId == userId
+      const portfoliosQuery = query(
+        collection(db, 'portfolios'),
+        where('userId', '==', userId)
+      );
+      const unsubPortfolios = onSnapshot(
+        portfoliosQuery,
+        (snap) => {
+          const list: RealtimePositionItem[] = snap.docs.map((d) => {
+            const item = d.data();
+            return {
+              symbol: item.stockSymbol || item.symbol || '',
               quantity: item.quantity || 0,
               avgPrice: item.avgPrice || 0,
               currentPrice: item.currentPrice,
-              productType: item.productType,
+              productType: item.productType || 'MIS',
               positionType: item.positionType || (item.quantity < 0 ? 'SHORT' : 'LONG'),
-              updatedAt: item.updatedAt,
-            }));
-            setPositions(list.filter((p) => p.symbol && p.quantity !== 0));
-            setIsConnected(true);
-            setLastSyncTime(new Date());
-          } else {
-            setPositions([]);
-          }
+              updatedAt: item.updatedAt || item.createdAt,
+            };
+          });
+          setPositions(list.filter((p) => p.symbol && p.quantity !== 0));
+          setIsConnected(true);
+          setLastSyncTime(new Date());
         },
         (error) => {
-          console.warn('RTDB portfolio listener error:', error);
+          console.warn('Firestore portfolio listener warning:', error.message);
         }
       );
+      unsubscribes.push(unsubPortfolios);
 
-      // 3. Listen to User Orders: orders/${userId}
-      const ordersRef = query(ref(rtdb, `orders/${userId}`), limitToLast(20));
-      const unsubscribeOrders = onValue(
-        ordersRef,
-        (snapshot) => {
-          if (snapshot.exists()) {
-            const data = snapshot.val();
-            const list: RealtimeTradeEvent[] = Object.values(data || {}).map((item: any) => ({
-              orderId: item.orderId,
-              symbol: item.symbol,
-              side: item.side,
-              quantity: item.quantity,
-              price: item.price,
+      // 3. Realtime Listen to User Orders: orders where userId == userId
+      const ordersQuery = query(
+        collection(db, 'orders'),
+        where('userId', '==', userId),
+        limit(25)
+      );
+      const unsubOrders = onSnapshot(
+        ordersQuery,
+        (snap) => {
+          const list: RealtimeTradeEvent[] = snap.docs.map((d) => {
+            const item = d.data();
+            return {
+              orderId: d.id,
+              symbol: item.stockSymbol || item.symbol || '',
+              side: item.type || item.side || 'BUY',
+              quantity: item.quantity || 0,
+              price: item.executedPrice ?? item.price ?? 0,
               status: item.status || 'FILLED',
-              productType: item.productType,
+              productType: item.productType || 'MIS',
               realizedPnL: item.realizedPnL,
-              timestamp: item.timestamp,
-            }));
-            setUserOrders(list.reverse());
-            setIsConnected(true);
-            setLastSyncTime(new Date());
-          }
+              timestamp: item.executedAt || item.createdAt || new Date().toISOString(),
+            };
+          });
+          list.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+          setUserOrders(list);
+          setIsConnected(true);
+          setLastSyncTime(new Date());
         },
         (error) => {
-          console.warn('RTDB orders listener error:', error);
+          console.warn('Firestore orders listener warning:', error.message);
         }
       );
+      unsubscribes.push(unsubOrders);
 
-      // 4. Listen to Global Live Trade Activity: live_activity
-      const activityRef = query(ref(rtdb, 'live_activity'), limitToLast(25));
-      const unsubscribeActivity = onValue(
-        activityRef,
-        (snapshot) => {
-          if (snapshot.exists()) {
-            const data = snapshot.val();
-            const list: RealtimeTradeEvent[] = Object.values(data || {}).map((item: any) => ({
-              symbol: item.symbol,
-              side: item.side,
-              quantity: item.quantity,
-              price: item.price,
+      // 4. Realtime Listen to Recent Transactions: transactions
+      const txnsQuery = query(
+        collection(db, 'transactions'),
+        limit(20)
+      );
+      const unsubTxns = onSnapshot(
+        txnsQuery,
+        (snap) => {
+          const list: RealtimeTradeEvent[] = snap.docs.map((d) => {
+            const item = d.data();
+            return {
+              orderId: d.id,
+              symbol: item.stockSymbol || '',
+              side: item.type || 'BUY',
+              quantity: item.quantity || 0,
+              price: item.price || 0,
               productType: item.productType,
-              realizedPnL: item.realizedPnL,
-              timestamp: item.timestamp,
-            }));
-            const sorted = list.reverse();
-            setLiveTrades(sorted);
-            if (sorted[0]) {
-              setLastEvent(sorted[0]);
-            }
-            setIsConnected(true);
-            setLastSyncTime(new Date());
-          }
+              timestamp: item.createdAt || new Date().toISOString(),
+            };
+          });
+          list.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+          setLiveTrades(list);
         },
         (error) => {
-          console.warn('RTDB activity listener error:', error);
+          console.warn('Firestore transactions listener warning:', error.message);
         }
       );
-
-      return () => {
-        off(balanceRef);
-        off(portfolioRef);
-        off(ordersRef);
-        off(activityRef);
-      };
-    } catch (err) {
-      console.warn('Error setting up RTDB listeners:', err);
-      setIsConnected(false);
+      unsubscribes.push(unsubTxns);
+    } catch (err: any) {
+      console.warn('Firestore realtime subscription setup error:', err?.message);
     }
+
+    return () => {
+      unsubscribes.forEach((unsub) => {
+        try {
+          unsub();
+        } catch {
+          // ignore cleanup errors
+        }
+      });
+    };
   }, [userId]);
 
   return {
@@ -164,7 +182,6 @@ export function useRealtimeTrading(userId: string = 'demo-user-123') {
     positions,
     userOrders,
     liveTrades,
-    lastEvent,
     isConnected,
     lastSyncTime,
   };

@@ -209,7 +209,7 @@ export default function Portfolio() {
               </span>
               <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20">
                 <Flame className="w-3 h-3 text-amber-400" />
-                RTDB Live
+                Firestore Live
               </span>
             </div>
             <div className="text-2xl font-black font-mono text-emerald-400 mb-1">
@@ -280,7 +280,7 @@ export default function Portfolio() {
             }`}
           >
             <Flame className="w-3.5 h-3.5" />
-            <span>🔥 Live RTDB Stream [{rtdbPositions.length} Pos • {rtdbOrders.length} Orders]</span>
+            <span>🔥 Live Firestore Stream [{rtdbPositions.length} Pos • {rtdbOrders.length} Orders]</span>
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping inline-block" />
           </button>
           <button
@@ -413,26 +413,26 @@ export default function Portfolio() {
                 </div>
                 <div>
                   <div className="text-sm font-bold text-white flex items-center gap-2">
-                    Firebase Realtime Database Stream
+                    Cloud Firestore Real-Time Stream
                     <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                      LIVE 0ms
+                      LIVE 0ms onSnapshot
                     </span>
                   </div>
                   <div className="text-xs text-slate-400 font-mono mt-0.5">
-                    URL: https://tradesphere-37a5c-default-rtdb.firebaseio.com
+                    Synced with collections: users, portfolios, orders, transactions
                   </div>
                 </div>
               </div>
 
               <div className="flex items-center gap-6 font-mono text-xs">
                 <div>
-                  <span className="text-slate-400 block text-[10px] uppercase">RTDB Cash</span>
+                  <span className="text-slate-400 block text-[10px] uppercase">Firestore Cash</span>
                   <span className="text-emerald-400 font-bold">
                     ₹{((rtdbBalance ?? 0) > 0 ? (rtdbBalance ?? balance) : balance).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
                   </span>
                 </div>
                 <div>
-                  <span className="text-slate-400 block text-[10px] uppercase">RTDB Positions</span>
+                  <span className="text-slate-400 block text-[10px] uppercase">Positions</span>
                   <span className="text-white font-bold">{rtdbPositions.length}</span>
                 </div>
                 <div>

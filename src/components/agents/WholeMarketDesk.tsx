@@ -1559,7 +1559,7 @@ export function WholeMarketDesk({
                   }`}
                 >
                   <Flame className="w-3.5 h-3.5" />
-                  Firebase RTDB
+                  Firestore Live
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping inline-block ml-0.5" />
                 </button>
               </div>
@@ -1568,7 +1568,7 @@ export function WholeMarketDesk({
                 {feedTab === 'FIREBASE_RTDB' ? (
                   <span className="text-amber-400 flex items-center gap-1">
                     <Database className="w-3 h-3" />
-                    rtdb: 0ms sync
+                    Firestore onSnapshot: 0ms sync
                   </span>
                 ) : (
                   <span className="text-emerald-400">Atomic Settlement</span>
@@ -1641,13 +1641,13 @@ export function WholeMarketDesk({
                 </div>
               )
             ) : (
-              // Tab 2: Firebase Realtime Database Stream
+              // Tab 2: Firestore Live Database Stream
               <div className="space-y-3 font-mono text-xs">
                 {/* Realtime Balance Widget */}
                 <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between">
                   <div>
                     <div className="text-[10px] uppercase font-bold text-amber-400 tracking-wider">
-                      Live RTDB Available Cash
+                      Live Firestore Cash
                     </div>
                     <div className="text-base font-extrabold text-white mt-0.5">
                       ₹{(rtdbBalance ?? 100000).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
@@ -1667,7 +1667,7 @@ export function WholeMarketDesk({
                 {/* RTDB Positions */}
                 <div>
                   <div className="flex items-center justify-between text-[11px] font-bold text-slate-400 mb-1.5">
-                    <span>RTDB Active Positions</span>
+                    <span>Active Positions (Firestore)</span>
                     <span className="text-slate-500">{rtdbPositions.length} active</span>
                   </div>
 
