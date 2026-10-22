@@ -620,7 +620,7 @@ export default function StockDetail() {
                 <h3 className="text-base font-bold text-white flex items-center gap-2">
                   TradeSphere AI Co-Pilot
                   <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/40">
-                    MLH HackOctober Engine
+                    Neural Quant Engine
                   </span>
                 </h3>
                 <p className="text-xs text-slate-400">Algorithmic technical assessment & momentum rating</p>

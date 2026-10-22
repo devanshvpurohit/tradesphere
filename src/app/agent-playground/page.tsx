@@ -76,6 +76,16 @@ export default function AgentPlayground() {
   const [editingAgent, setEditingAgent] = useState<CustomAgentConfig | null>(null);
   const [showApiKey, setShowApiKey] = useState(false);
 
+  // Dynamic model discovery state
+  const [fetchingModels, setFetchingModels] = useState<boolean>(false);
+  const [dynamicModels, setDynamicModels] = useState<
+    { id: string; label: string; description?: string }[]
+  >([]);
+  const [modelFetchStatus, setModelFetchStatus] = useState<{
+    success: boolean;
+    message: string;
+  } | null>(null);
+
   // Form State for modal
   const [formName, setFormName] = useState('');
   const [formRole, setFormRole] = useState('');
@@ -91,6 +101,57 @@ export default function AgentPlayground() {
 
   // User portfolio cash
   const [portfolioBalance, setPortfolioBalance] = useState<number>(1000000);
+
+  // Dynamic fetch models for API key / provider
+  const fetchModelsForKey = async (provider: AIProvider, key: string, ollamaUrl?: string) => {
+    if (provider !== 'ollama' && (!key || key.trim().length < 4)) {
+      setModelFetchStatus(null);
+      setDynamicModels([]);
+      return;
+    }
+
+    setFetchingModels(true);
+    setModelFetchStatus(null);
+
+    try {
+      const res = await fetch('/api/agents/provider-models', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider,
+          apiKey: key.trim(),
+          ollamaBaseUrl: ollamaUrl || 'http://localhost:11434',
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success && Array.isArray(data.models) && data.models.length > 0) {
+        setDynamicModels(data.models);
+        setModelFetchStatus({
+          success: true,
+          message: `Verified: ${data.models.length} models retrieved from your ${PROVIDER_METADATA[provider].name} account`,
+        });
+        const exists = data.models.some((m: any) => m.id === formModel);
+        if (!exists && data.models[0]?.id) {
+          setFormModel(data.models[0].id);
+        }
+      } else {
+        setDynamicModels([]);
+        setModelFetchStatus({
+          success: false,
+          message: data.error || 'Failed to retrieve models with this key.',
+        });
+      }
+    } catch (err: any) {
+      setDynamicModels([]);
+      setModelFetchStatus({
+        success: false,
+        message: err.message || 'Connection error',
+      });
+    } finally {
+      setFetchingModels(false);
+    }
+  };
 
   // ==========================================
   // QUANT CODE BACKTESTER STATE
@@ -179,16 +240,18 @@ export default function AgentPlayground() {
     setFormRole('Algorithmic Scalper');
     setFormDescription('Custom AI trading agent tailored for technical momentum and breakout setups.');
     setFormAvatar('🤖');
-    setFormProvider(ollamaStatus.connected ? 'ollama' : 'openai');
-    setFormModel(
+    const defaultProv = ollamaStatus.connected ? 'ollama' : 'openai';
+    setFormProvider(defaultProv);
+    const initialModel =
       ollamaStatus.connected && ollamaStatus.models.length > 0
         ? ollamaStatus.models[0].name
-        : 'gpt-4o-mini'
-    );
+        : 'gpt-4o-mini';
+    setFormModel(initialModel);
     setFormOllamaUrl('http://localhost:11434');
 
     const savedKeys = JSON.parse(localStorage.getItem('tradesphere_api_keys') || '{}');
-    setFormApiKey(savedKeys['openai'] || '');
+    const activeKey = savedKeys[defaultProv] || '';
+    setFormApiKey(activeKey);
 
     setFormPrompt(
       `You are an expert quantitative trading bot.
@@ -199,6 +262,8 @@ Strictly return your final decision as a JSON object.`
     setFormTemperature(0.1);
     setFormMaxRisk(5);
     setIsModalOpen(true);
+
+    fetchModelsForKey(defaultProv, activeKey, 'http://localhost:11434');
   };
 
   const handleOpenEditModal = (agent: CustomAgentConfig) => {
@@ -215,6 +280,8 @@ Strictly return your final decision as a JSON object.`
     setFormTemperature(agent.temperature);
     setFormMaxRisk(agent.maxRiskPerTradePercent);
     setIsModalOpen(true);
+
+    fetchModelsForKey(agent.provider, agent.apiKey || '', agent.ollamaBaseUrl);
   };
 
   const handleSaveAgent = () => {
@@ -490,7 +557,7 @@ Strictly return your final decision as a JSON object.`
             <div className="flex items-center gap-2 mb-1 flex-wrap">
               <span className="text-[11px] font-mono font-bold px-2 py-0.5 rounded bg-blue-500/20 text-blue-400 border border-blue-500/30 flex items-center gap-1">
                 <Sparkles className="w-3 h-3 text-yellow-400" />
-                HACKOCTOBER MLH X TECH4HACK
+                AUTONOMOUS AI TRADING LAB
               </span>
               <span className="text-slate-500">•</span>
               <span className="text-xs text-slate-400">Autonomous Agent Playground</span>
@@ -1483,13 +1550,11 @@ print("Ollama Decision:", response['message']['content'])`}
                         key={prov}
                         onClick={() => {
                           setFormProvider(prov);
-                          setFormModel(meta.defaultModel);
                           const savedKeys = JSON.parse(localStorage.getItem('tradesphere_api_keys') || '{}');
-                          if (savedKeys[prov]) {
-                            setFormApiKey(savedKeys[prov]);
-                          } else if (prov === 'ollama') {
-                            setFormApiKey('');
-                          }
+                          const existingKey = savedKeys[prov] || '';
+                          setFormApiKey(existingKey);
+                          setFormModel(meta.defaultModel);
+                          fetchModelsForKey(prov, existingKey, formOllamaUrl);
                         }}
                         className={`p-2.5 rounded-xl border text-left flex items-center gap-2 transition-all ${
                           isSelected
@@ -1517,38 +1582,77 @@ print("Ollama Decision:", response['message']['content'])`}
                     <label className="font-bold text-emerald-400 block mb-1 flex items-center gap-1">
                       <span>🦙 Ollama Base URL</span>
                     </label>
-                    <input
-                      type="text"
-                      value={formOllamaUrl}
-                      onChange={(e) => setFormOllamaUrl(e.target.value)}
-                      placeholder="http://localhost:11434"
-                      className="w-full bg-slate-900 border border-slate-700 text-white font-mono text-xs rounded-xl px-3 py-2 outline-none"
-                    />
+                    <div className="flex gap-1.5">
+                      <input
+                        type="text"
+                        value={formOllamaUrl}
+                        onChange={(e) => setFormOllamaUrl(e.target.value)}
+                        placeholder="http://localhost:11434"
+                        className="w-full bg-slate-900 border border-slate-700 text-white font-mono text-xs rounded-xl px-3 py-2 outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => fetchModelsForKey('ollama', '', formOllamaUrl)}
+                        disabled={fetchingModels}
+                        className="px-2.5 py-2 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-xs font-mono"
+                        title="Scan Ollama models"
+                      >
+                        {fetchingModels ? (
+                          <div className="w-3 h-3 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin" />
+                        ) : (
+                          <RotateCcw className="w-3.5 h-3.5" />
+                        )}
+                      </button>
+                    </div>
+                    {modelFetchStatus && (
+                      <div className={`mt-2 p-1.5 rounded-lg text-[10px] font-mono flex items-center gap-1.5 border ${
+                        modelFetchStatus.success
+                          ? 'bg-emerald-950/40 border-emerald-500/30 text-emerald-400'
+                          : 'bg-rose-950/40 border-rose-500/30 text-rose-300'
+                      }`}>
+                        <span>{modelFetchStatus.success ? '✓' : '⚠️'}</span>
+                        <span className="line-clamp-2">{modelFetchStatus.message}</span>
+                      </div>
+                    )}
                   </div>
 
                   <div>
-                    <label className="font-bold text-slate-300 block mb-1">Local Model Name</label>
-                    {ollamaStatus.models.length > 0 ? (
-                      <select
-                        value={formModel}
-                        onChange={(e) => setFormModel(e.target.value)}
-                        className="w-full bg-slate-900 border border-slate-700 text-white font-mono text-xs rounded-xl px-3 py-2 outline-none"
-                      >
-                        {ollamaStatus.models.map((m) => (
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="font-bold text-slate-300 block">Local Models ({dynamicModels.length || ollamaStatus.models.length})</label>
+                      <span className="text-[10px] text-emerald-400 font-mono font-bold">100% Free / Private</span>
+                    </div>
+                    <select
+                      value={formModel}
+                      onChange={(e) => setFormModel(e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-700 text-white font-mono text-xs rounded-xl px-3 py-2 outline-none mb-1.5"
+                    >
+                      {dynamicModels.length > 0 ? (
+                        dynamicModels.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.label} {m.description ? `— ${m.description}` : ''}
+                          </option>
+                        ))
+                      ) : ollamaStatus.models.length > 0 ? (
+                        ollamaStatus.models.map((m) => (
                           <option key={m.name} value={m.name}>
                             {m.name} {m.sizeMb ? `(${m.sizeMb}MB)` : ''}
                           </option>
-                        ))}
-                      </select>
-                    ) : (
-                      <input
-                        type="text"
-                        value={formModel}
-                        onChange={(e) => setFormModel(e.target.value)}
-                        placeholder="gemma3:1b or llama3.2"
-                        className="w-full bg-slate-900 border border-slate-700 text-white font-mono text-xs rounded-xl px-3 py-2 outline-none"
-                      />
-                    )}
+                        ))
+                      ) : (
+                        PROVIDER_METADATA['ollama'].suggestedModels.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.label}
+                          </option>
+                        ))
+                      )}
+                    </select>
+                    <input
+                      type="text"
+                      value={formModel}
+                      onChange={(e) => setFormModel(e.target.value)}
+                      placeholder="Or type custom model name..."
+                      className="w-full bg-slate-900 border border-slate-700 text-slate-400 font-mono text-[10px] rounded-lg px-2.5 py-1 outline-none"
+                    />
                   </div>
                 </div>
               ) : (
@@ -1568,30 +1672,85 @@ print("Ollama Decision:", response['message']['content'])`}
                         <span>{showApiKey ? 'Hide' : 'Show'}</span>
                       </button>
                     </div>
-                    <input
-                      type={showApiKey ? 'text' : 'password'}
-                      value={formApiKey}
-                      onChange={(e) => setFormApiKey(e.target.value)}
-                      placeholder={`Enter your ${PROVIDER_METADATA[formProvider].name} key...`}
-                      className="w-full bg-slate-900 border border-slate-700 text-white font-mono text-xs rounded-xl px-3 py-2 outline-none"
-                    />
+                    <div className="flex gap-1.5">
+                      <input
+                        type={showApiKey ? 'text' : 'password'}
+                        value={formApiKey}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setFormApiKey(val);
+                          if (val.trim().length > 6) {
+                            fetchModelsForKey(formProvider, val.trim(), formOllamaUrl);
+                          }
+                        }}
+                        onBlur={() => {
+                          if (formApiKey.trim().length > 6) {
+                            fetchModelsForKey(formProvider, formApiKey.trim(), formOllamaUrl);
+                          }
+                        }}
+                        placeholder={`Enter your ${PROVIDER_METADATA[formProvider].name} key...`}
+                        className="w-full bg-slate-900 border border-slate-700 text-white font-mono text-xs rounded-xl px-3 py-2 outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => fetchModelsForKey(formProvider, formApiKey.trim(), formOllamaUrl)}
+                        disabled={fetchingModels || !formApiKey.trim()}
+                        className="px-2.5 py-2 rounded-xl bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border border-blue-500/40 text-xs font-mono disabled:opacity-40"
+                        title="Fetch models with this key"
+                      >
+                        {fetchingModels ? (
+                          <div className="w-3 h-3 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+                        ) : (
+                          <RotateCcw className="w-3.5 h-3.5" />
+                        )}
+                      </button>
+                    </div>
+
+                    {modelFetchStatus && (
+                      <div className={`mt-2 p-1.5 rounded-lg text-[10px] font-mono flex items-center gap-1.5 border ${
+                        modelFetchStatus.success
+                          ? 'bg-emerald-950/40 border-emerald-500/30 text-emerald-400'
+                          : 'bg-rose-950/40 border-rose-500/30 text-rose-300'
+                      }`}>
+                        <span>{modelFetchStatus.success ? '✓' : '⚠️'}</span>
+                        <span className="line-clamp-2">{modelFetchStatus.message}</span>
+                      </div>
+                    )}
+
                     <span className="text-[10px] text-slate-500 mt-1 block">
                       🔒 Saved locally in your browser. Never committed or sent to external servers.
                     </span>
                   </div>
 
                   <div>
-                    <label className="font-bold text-slate-300 block mb-1">Model Selection</label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="font-bold text-slate-300 block">
+                        Available Models {dynamicModels.length > 0 ? `(${dynamicModels.length} Loaded)` : ''}
+                      </label>
+                      {dynamicModels.length > 0 && (
+                        <span className="text-[10px] text-emerald-400 font-mono font-bold">
+                          ✓ Key Authorized
+                        </span>
+                      )}
+                    </div>
                     <select
                       value={formModel}
                       onChange={(e) => setFormModel(e.target.value)}
                       className="w-full bg-slate-900 border border-slate-700 text-white font-mono text-xs rounded-xl px-3 py-2 outline-none mb-1.5"
                     >
-                      {PROVIDER_METADATA[formProvider].suggestedModels.map((m) => (
-                        <option key={m.id} value={m.id}>
-                          {m.label}
-                        </option>
-                      ))}
+                      {dynamicModels.length > 0 ? (
+                        dynamicModels.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.label} {m.description ? `— ${m.description}` : ''}
+                          </option>
+                        ))
+                      ) : (
+                        PROVIDER_METADATA[formProvider].suggestedModels.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.label}
+                          </option>
+                        ))
+                      )}
                     </select>
                     <input
                       type="text"

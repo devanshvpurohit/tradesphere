@@ -26,6 +26,25 @@ Powered by **Google Firebase (Authentication & Cloud Firestore)** and styled wit
 - **GTT Target & Stop-Loss Brackets**: Real-time estimated profit & loss projections in ₹ with Risk-to-Reward ratio calculator (`1 : 2.5`).
 - **One-Click Position Management**: Instant "Add More" or "Exit Position" straight from your portfolio table.
 
+### 🤖 Multi-LLM Autonomous AI Agent Studio & Sandbox
+- **Build Custom AI Trading Agents**: Create autonomous trading agents powered by:
+  - **Ollama (100% Free & Local)**: Auto-detects local models (`gemma3:1b`, `llama3.2`, `deepseek-r1`) with zero API keys and 100% privacy.
+  - **OpenAI**: `gpt-4o`, `gpt-4o-mini`, `o1-preview`.
+  - **Anthropic Claude**: `claude-3-5-sonnet`, `claude-3-5-haiku`.
+  - **Google Gemini**: `gemini-1.5-flash`, `gemini-1.5-pro`.
+  - **Groq**: Ultra-fast LPU inference (500+ tok/s) with `llama-3.3-70b-versatile`.
+  - **OpenRouter**: Access to 100+ open-source models.
+- **Dynamic Model Auto-Discovery**: Enter your provider API key to automatically retrieve and populate the exact list of authorized models for your account.
+- **Real-Time Technical Dossier**: Feeds live RSI, MACD, 20 EMA, 50 SMA, Bollinger Bands, and risk parameters to generate quantitative BUY/SELL/HOLD recommendations.
+- **1-Click Portfolio Execution**: Directly route the agent's recommended quantity and target/stop-loss into your live Firebase portfolio.
+- **Algorithmic Quant Sandbox**: JavaScript/TypeScript backtesting IDE with Sharpe ratio, Win Rate %, Max Drawdown %, and step-by-step trade logs.
+- **External Bot Webhooks**: REST endpoints (`POST /api/agents/trade`) for Python, LangChain, AutoGen, and CrewAI swarms.
+
+### 📊 F&O Options Desk & Black-Scholes Greeks
+- **Real-Time Analytical Pricing**: Analytical pricing of European options using the Black-Scholes model.
+- **First & Second Order Greeks**: Real-time Delta ($\Delta$), Theta ($\theta$), Gamma ($\gamma$), and Vega ($\nu$) for NIFTY 50 and BANK NIFTY option chains.
+- **Put-Call Ratio (PCR) & Max Pain**: Instant institutional sentiment overview.
+
 ### 🔥 Powered by Firebase
 - **Firebase Authentication**: Email/Password and Google OAuth sign-in.
 - **Instant Demo Mode**: One-click demo trader account preloaded with ₹1,00,000 — test immediately without registration!

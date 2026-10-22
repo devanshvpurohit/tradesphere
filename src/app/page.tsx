@@ -71,17 +71,12 @@ export default function Home() {
       {/* Hero Section */}
       <section className="pt-32 pb-20 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto text-center relative z-10">
         <div className="inline-flex flex-wrap items-center justify-center gap-2 px-4 py-2 rounded-full bg-slate-900/90 border border-slate-800 text-xs text-slate-300 mb-8 shadow-inner">
-          <a
-            href="https://hackoctober-mlh-x-tech4hack.devpost.com/"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-1.5 text-blue-400 hover:text-blue-300 font-bold tracking-wide hover:underline"
-          >
+          <div className="flex items-center gap-1.5 text-blue-400 font-bold tracking-wide">
             <Sparkles className="w-3.5 h-3.5 text-yellow-400" />
-            <span>HackOctober MLH X Tech4hack Submission</span>
-          </a>
+            <span>Next-Gen Institutional Trading Terminal</span>
+          </div>
           <span className="text-slate-600">|</span>
-          <span className="text-slate-400">AI Co-pilot • F&O Options Desk • Firebase Cloud Synced</span>
+          <span className="text-slate-400">Multi-LLM AI Agent Studio • F&O Options Desk • Firebase Cloud Synced</span>
         </div>
 
         <h1 className="text-4xl sm:text-6xl lg:text-7xl font-black tracking-tight text-white max-w-5xl mx-auto leading-[1.1]">
