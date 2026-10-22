@@ -127,6 +127,7 @@ export class FirebaseDatabaseService {
   async resetUserFunds(userId: string): Promise<number> {
     const newBalance = 100000;
     realtimeDb.syncUserBalance(userId, newBalance);
+    realtimeDb.clearPortfolio(userId);
     if (adminDb) {
       try {
         await adminDb.collection('users').doc(userId).set(
@@ -559,6 +560,18 @@ export class FirebaseDatabaseService {
     }
 
     realtimeDb.syncUserBalance(userId, user.balance);
+    realtimeDb.syncPosition(userId, symbol, holding.quantity, holding.avgPrice, 'SHORT');
+    realtimeDb.publishOrderEvent({
+      orderId: txRecord.id,
+      userId,
+      symbol,
+      side: 'SELL',
+      quantity,
+      price,
+      status: 'FILLED',
+      timestamp: now,
+      productType,
+    });
     return {
       success: true,
       message: `Successfully executed SHORT on ${quantity} shares of ${symbol} @ ₹${price.toFixed(2)}`,
@@ -631,6 +644,25 @@ export class FirebaseDatabaseService {
     }
 
     realtimeDb.syncUserBalance(userId, user.balance);
+    realtimeDb.syncPosition(
+      userId,
+      symbol,
+      shortQty === qtyToCover ? 0 : holding.quantity,
+      holding?.avgPrice || price,
+      'SHORT'
+    );
+    realtimeDb.publishOrderEvent({
+      orderId: txRecord.id,
+      userId,
+      symbol,
+      side: 'BUY',
+      quantity: qtyToCover,
+      price,
+      status: 'FILLED',
+      timestamp: now,
+      productType,
+      realizedPnL,
+    });
     return {
       success: true,
       message: `Successfully covered ${qtyToCover} shares of ${symbol} @ ₹${price.toFixed(2)}. Realized P&L: ${realizedPnL >= 0 ? '+' : ''}₹${realizedPnL.toFixed(2)}`,

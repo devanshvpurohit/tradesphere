@@ -37,7 +37,10 @@ import {
   Eye,
   EyeOff,
   RefreshCw,
+  Flame,
+  Database,
 } from 'lucide-react';
+import { useRealtimeTrading } from '@/hooks/useRealtimeTrading';
 import {
   MarketSignalRecord,
   WholeMarketExecutionItem,
@@ -164,6 +167,16 @@ export function WholeMarketDesk({
   const [ollamaBaseUrl, setOllamaBaseUrl] = useState<string>('http://localhost:11434');
   const [showApiKey, setShowApiKey] = useState<boolean>(false);
   const [temperature, setTemperature] = useState<number>(0.1);
+
+  // Firebase Realtime Database Hook
+  const {
+    balance: rtdbBalance,
+    positions: rtdbPositions,
+    userOrders: rtdbOrders,
+    liveTrades: rtdbLiveTrades,
+    isConnected: rtdbConnected,
+  } = useRealtimeTrading();
+  const [feedTab, setFeedTab] = useState<'AGENT_LOGS' | 'FIREBASE_RTDB'>('AGENT_LOGS');
 
   // Dynamic Models from API Key
   const [dynamicModels, setDynamicModels] = useState<{ id: string; label: string; description?: string }[]>([]);
@@ -1247,7 +1260,7 @@ export function WholeMarketDesk({
       )}
 
       {/* Configuration & Status Ribbon */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5 py-5 border-b border-slate-800 text-xs font-mono relative z-10">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 py-5 border-b border-slate-800 text-xs font-mono relative z-10">
         {/* Runner Status */}
         <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-slate-800 flex items-center justify-between">
           <div>
@@ -1256,16 +1269,16 @@ export function WholeMarketDesk({
               {isRunning ? (
                 <>
                   <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-                  <span className="text-emerald-400">ACTIVE RUNNER</span>
+                  <span className="text-emerald-400">ACTIVE</span>
                 </>
               ) : (
-                <span className="text-slate-400">STANDBY · READY</span>
+                <span className="text-slate-400">STANDBY</span>
               )}
             </div>
           </div>
           {isRunning && (
             <div className="text-right">
-              <span className="text-[10px] text-slate-500">Next Sweep</span>
+              <span className="text-[10px] text-slate-500">Next</span>
               <div className="text-xs font-bold text-emerald-400">{countdown}s</div>
             </div>
           )}
@@ -1278,7 +1291,7 @@ export function WholeMarketDesk({
               <Bot className="w-3 h-3 text-purple-400" />
               <span>LLM Engine</span>
             </div>
-            <div className="text-xs font-bold text-slate-200 truncate max-w-[130px]">
+            <div className="text-xs font-bold text-slate-200 truncate max-w-[100px]">
               {enableLLM ? `${llmProvider.toUpperCase()}` : 'HEURISTIC'}
             </div>
           </div>
@@ -1286,42 +1299,61 @@ export function WholeMarketDesk({
             onClick={() => setIsCustomizing(true)}
             className="text-[10px] font-bold text-purple-400 hover:underline"
           >
-            {enableLLM ? llmModel.split('-')[0] : 'Enable &rarr;'}
+            {enableLLM ? llmModel.split('-')[0] : 'Enable'}
           </button>
         </div>
 
         {/* Universe Scope */}
         <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-slate-800 flex items-center justify-between">
           <div>
-            <div className="text-[10px] text-slate-400 uppercase font-semibold mb-0.5">Universe Scope</div>
+            <div className="text-[10px] text-slate-400 uppercase font-semibold mb-0.5">Universe</div>
             <div className="text-xs font-bold text-slate-200">
-              {customUniverse.length} Scrips Active
+              {customUniverse.length} Scrips
             </div>
           </div>
           <button
             onClick={() => setIsCustomizing(true)}
             className="text-[10px] font-bold text-blue-400 hover:underline"
           >
-            Edit &rarr;
+            Edit
           </button>
+        </div>
+
+        {/* Firebase Realtime Database Status */}
+        <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-slate-800 flex items-center justify-between">
+          <div>
+            <div className="text-[10px] text-slate-400 uppercase font-semibold mb-0.5 flex items-center gap-1">
+              <Flame className="w-3 h-3 text-orange-400" />
+              <span>Firebase RTDB</span>
+            </div>
+            <div className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
+              <span className={`w-1.5 h-1.5 rounded-full ${rtdbConnected ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`} />
+              <span className={rtdbConnected ? 'text-emerald-400' : 'text-slate-400'}>
+                {rtdbConnected ? 'LIVE SYNC' : 'SYNCING'}
+              </span>
+            </div>
+          </div>
+          <div className="text-right">
+            <span className="text-[10px] text-slate-500 font-mono">0ms Latency</span>
+          </div>
         </div>
 
         {/* Short Selling Toggle */}
         <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-slate-800 flex items-center justify-between">
           <div>
-            <div className="text-[10px] text-slate-400 uppercase font-semibold">Intraday Shorting</div>
+            <div className="text-[10px] text-slate-400 uppercase font-semibold">Shorting</div>
             <div className="text-xs font-bold text-slate-200 mt-0.5">
               {allowShorts ? `ON (${productType})` : 'LONG-ONLY'}
             </div>
           </div>
           <button
             onClick={() => setAllowShorts((prev) => !prev)}
-            className={`w-10 h-6 rounded-full transition-colors relative p-0.5 ${
+            className={`w-9 h-5 rounded-full transition-colors relative p-0.5 ${
               allowShorts ? 'bg-emerald-500' : 'bg-slate-700'
             }`}
           >
             <div
-              className={`w-5 h-5 rounded-full bg-white transition-transform ${
+              className={`w-4 h-4 rounded-full bg-white transition-transform ${
                 allowShorts ? 'translate-x-4' : 'translate-x-0'
               }`}
             />
@@ -1330,7 +1362,7 @@ export function WholeMarketDesk({
 
         {/* Sweep Interval */}
         <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-slate-800">
-          <div className="text-[10px] text-slate-400 uppercase font-semibold mb-1">Sweep Cadence</div>
+          <div className="text-[10px] text-slate-400 uppercase font-semibold mb-1">Cadence</div>
           <select
             value={intervalSec}
             onChange={(e) => {
@@ -1338,13 +1370,13 @@ export function WholeMarketDesk({
               setIntervalSec(sec);
               setCountdown(sec);
             }}
-            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-slate-200 text-xs focus:outline-none focus:border-blue-500 font-mono"
+            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-1.5 py-1 text-slate-200 text-xs focus:outline-none focus:border-blue-500 font-mono"
           >
-            <option value={10}>10s (Ultra-Fast)</option>
-            <option value={15}>15s (High Frequency)</option>
-            <option value={20}>20s (Recommended)</option>
-            <option value={30}>30s (Conservative)</option>
-            <option value={60}>60s (Full-Day)</option>
+            <option value={10}>10s (Fast)</option>
+            <option value={15}>15s</option>
+            <option value={20}>20s</option>
+            <option value={30}>30s</option>
+            <option value={60}>60s</option>
           </select>
         </div>
       </div>
@@ -1499,80 +1531,255 @@ export function WholeMarketDesk({
           )}
         </div>
 
-        {/* Right Column (5 cols): Live Action Logs & Executions */}
+        {/* Right Column (5 cols): Live Action Logs & RTDB Stream */}
         <div className="lg:col-span-5 bg-slate-950/60 border border-slate-800/80 rounded-2xl p-5 flex flex-col justify-between">
           <div>
+            {/* Tab Header */}
             <div className="flex items-center justify-between pb-3 mb-3 border-b border-slate-800">
-              <div className="flex items-center gap-2">
-                <Activity className="w-4 h-4 text-emerald-400" />
-                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-300">
-                  Live Execution Feed ({executionLogs.length})
-                </h4>
+              <div className="flex items-center gap-1.5 p-0.5 bg-slate-900 border border-slate-800 rounded-lg">
+                <button
+                  type="button"
+                  onClick={() => setFeedTab('AGENT_LOGS')}
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-bold transition-all ${
+                    feedTab === 'AGENT_LOGS'
+                      ? 'bg-blue-600 text-white shadow-sm'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Activity className="w-3.5 h-3.5" />
+                  Agent Feed ({executionLogs.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFeedTab('FIREBASE_RTDB')}
+                  className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-bold transition-all ${
+                    feedTab === 'FIREBASE_RTDB'
+                      ? 'bg-amber-500 text-slate-950 shadow-sm'
+                      : 'text-amber-400/90 hover:text-amber-300'
+                  }`}
+                >
+                  <Flame className="w-3.5 h-3.5" />
+                  Firebase RTDB
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping inline-block ml-0.5" />
+                </button>
               </div>
-              <span className="text-[10px] font-mono text-emerald-400">Atomic Settlement</span>
+
+              <div className="flex items-center gap-1.5 text-[10px] font-mono">
+                {feedTab === 'FIREBASE_RTDB' ? (
+                  <span className="text-amber-400 flex items-center gap-1">
+                    <Database className="w-3 h-3" />
+                    rtdb: 0ms sync
+                  </span>
+                ) : (
+                  <span className="text-emerald-400">Atomic Settlement</span>
+                )}
+              </div>
             </div>
 
-            {executionLogs.length === 0 ? (
-              <div className="py-20 text-center text-xs text-slate-500 font-mono">
-                <Clock className="w-8 h-8 text-slate-600 mx-auto mb-2" />
-                <div>No trades triggered yet.</div>
-                <div className="text-[10px] text-slate-600 mt-1">
-                  The agent will record every executed Buy, Short, and Sell ticket here.
+            {feedTab === 'AGENT_LOGS' ? (
+              // Tab 1: Agent Execution Tickets
+              executionLogs.length === 0 ? (
+                <div className="py-20 text-center text-xs text-slate-500 font-mono">
+                  <Clock className="w-8 h-8 text-slate-600 mx-auto mb-2" />
+                  <div>No trades triggered yet in this session.</div>
+                  <div className="text-[10px] text-slate-600 mt-1">
+                    The agent will record every executed Buy, Short, and Sell ticket here.
+                  </div>
                 </div>
-              </div>
-            ) : (
-              <div className="space-y-2.5 max-h-[460px] overflow-y-auto pr-1 scrollbar-none font-mono text-xs">
-                {executionLogs.map((item) => {
-                  const isBuy = item.action === 'BUY';
-                  const isShort = item.action === 'SHORT';
-                  const isExit = item.action === 'SELL' || item.action === 'COVER';
-                  const currency = item.symbol.endsWith('.NS') ? '₹' : '$';
+              ) : (
+                <div className="space-y-2.5 max-h-[460px] overflow-y-auto pr-1 scrollbar-none font-mono text-xs">
+                  {executionLogs.map((item) => {
+                    const isBuy = item.action === 'BUY';
+                    const isShort = item.action === 'SHORT';
+                    const currency = item.symbol.endsWith('.NS') ? '₹' : '$';
 
-                  return (
-                    <div
-                      key={item.id}
-                      className="p-3 rounded-xl bg-slate-900/80 border border-slate-800 text-xs"
-                    >
-                      <div className="flex items-center justify-between mb-1">
-                        <span
-                          className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                            isBuy
-                              ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
-                              : isShort
-                              ? 'bg-rose-500/20 text-rose-400 border border-rose-500/40'
-                              : 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
-                          }`}
-                        >
-                          {item.action} ({productType})
-                        </span>
-                        <span className="text-[10px] text-slate-500">{item.timestamp}</span>
-                      </div>
-
-                      <div className="font-bold text-white mb-1">
-                        {item.quantity}x {item.symbol} @ {currency}{item.price.toFixed(2)}
-                      </div>
-
-                      <div className="text-[11px] text-slate-400 mb-1">
-                        Value: {currency}{item.totalValue.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
-                        {item.marginUsed > 0 && ` • Margin: ${currency}${item.marginUsed.toFixed(2)}`}
-                      </div>
-
-                      {item.realizedPnL !== undefined && (
-                        <div
-                          className={`text-[11px] font-bold ${
-                            item.realizedPnL >= 0 ? 'text-emerald-400' : 'text-rose-400'
-                          }`}
-                        >
-                          Realized P&L: {item.realizedPnL >= 0 ? '+' : ''}{currency}{item.realizedPnL.toFixed(2)}
+                    return (
+                      <div
+                        key={item.id}
+                        className="p-3 rounded-xl bg-slate-900/80 border border-slate-800 text-xs"
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <span
+                            className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                              isBuy
+                                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
+                                : isShort
+                                ? 'bg-rose-500/20 text-rose-400 border border-rose-500/40'
+                                : 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
+                            }`}
+                          >
+                            {item.action} ({productType})
+                          </span>
+                          <span className="text-[10px] text-slate-500">{item.timestamp}</span>
                         </div>
-                      )}
 
-                      <div className="text-[10px] text-slate-400 mt-1 italic leading-tight">
-                        &quot;{item.reason}&quot;
+                        <div className="font-bold text-white mb-1">
+                          {item.quantity}x {item.symbol} @ {currency}{item.price.toFixed(2)}
+                        </div>
+
+                        <div className="text-[11px] text-slate-400 mb-1">
+                          Value: {currency}{item.totalValue.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                          {item.marginUsed > 0 && ` • Margin: ${currency}${item.marginUsed.toFixed(2)}`}
+                        </div>
+
+                        {item.realizedPnL !== undefined && (
+                          <div
+                            className={`text-[11px] font-bold ${
+                              item.realizedPnL >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                            }`}
+                          >
+                            Realized P&L: {item.realizedPnL >= 0 ? '+' : ''}{currency}{item.realizedPnL.toFixed(2)}
+                          </div>
+                        )}
+
+                        <div className="text-[10px] text-slate-400 mt-1 italic leading-tight">
+                          &quot;{item.reason}&quot;
+                        </div>
                       </div>
+                    );
+                  })}
+                </div>
+              )
+            ) : (
+              // Tab 2: Firebase Realtime Database Stream
+              <div className="space-y-3 font-mono text-xs">
+                {/* Realtime Balance Widget */}
+                <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between">
+                  <div>
+                    <div className="text-[10px] uppercase font-bold text-amber-400 tracking-wider">
+                      Live RTDB Available Cash
                     </div>
-                  );
-                })}
+                    <div className="text-base font-extrabold text-white mt-0.5">
+                      ₹{(rtdbBalance ?? 100000).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                      Live Stream
+                    </span>
+                    <div className="text-[10px] text-slate-400 mt-1">
+                      {rtdbPositions.length} pos • {rtdbOrders.length} orders
+                    </div>
+                  </div>
+                </div>
+
+                {/* RTDB Positions */}
+                <div>
+                  <div className="flex items-center justify-between text-[11px] font-bold text-slate-400 mb-1.5">
+                    <span>RTDB Active Positions</span>
+                    <span className="text-slate-500">{rtdbPositions.length} active</span>
+                  </div>
+
+                  {rtdbPositions.length === 0 ? (
+                    <div className="py-6 text-center text-xs text-slate-500 bg-slate-900/40 rounded-xl border border-slate-800">
+                      No open positions in Firebase Realtime Database.
+                    </div>
+                  ) : (
+                    <div className="space-y-2 max-h-[190px] overflow-y-auto pr-1 scrollbar-none">
+                      {rtdbPositions.map((pos) => {
+                        const isShort = pos.positionType === 'SHORT';
+                        const currency = pos.symbol.endsWith('.NS') ? '₹' : '$';
+                        const current = pos.currentPrice || pos.avgPrice;
+                        const pnl = isShort
+                          ? (pos.avgPrice - current) * pos.quantity
+                          : (current - pos.avgPrice) * pos.quantity;
+
+                        return (
+                          <div
+                            key={pos.symbol}
+                            className="p-2.5 rounded-xl bg-slate-900/80 border border-slate-800 text-xs flex items-center justify-between"
+                          >
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="font-bold text-white">{pos.symbol}</span>
+                                <span
+                                  className={`px-1.5 py-0.2 rounded text-[9px] font-bold ${
+                                    isShort
+                                      ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
+                                      : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                                  }`}
+                                >
+                                  {pos.positionType || 'LONG'}
+                                </span>
+                                {pos.productType && (
+                                  <span className="text-[9px] text-slate-500 bg-slate-800 px-1 rounded">
+                                    {pos.productType}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-[10px] text-slate-400 mt-0.5">
+                                {pos.quantity} shares @ {currency}{pos.avgPrice.toFixed(2)}
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <div
+                                className={`font-bold ${
+                                  pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                                }`}
+                              >
+                                {pnl >= 0 ? '+' : ''}{currency}{pnl.toFixed(2)}
+                              </div>
+                              <div className="text-[10px] text-slate-500">
+                                LTP: {currency}{current.toFixed(2)}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* RTDB Live Order Events */}
+                <div>
+                  <div className="flex items-center justify-between text-[11px] font-bold text-slate-400 mb-1.5">
+                    <span>Recent Realtime Orders</span>
+                    <span className="text-slate-500">{rtdbOrders.length} events</span>
+                  </div>
+
+                  {rtdbOrders.length === 0 ? (
+                    <div className="py-6 text-center text-xs text-slate-500 bg-slate-900/40 rounded-xl border border-slate-800">
+                      No order notifications published to Firebase RTDB yet.
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5 max-h-[170px] overflow-y-auto pr-1 scrollbar-none text-[11px]">
+                      {rtdbOrders.slice(0, 10).map((ord) => {
+                        const isBuy = ord.side === 'BUY';
+                        const isShort = ord.side === 'SHORT';
+                        const currency = ord.symbol.endsWith('.NS') ? '₹' : '$';
+
+                        return (
+                          <div
+                            key={ord.orderId}
+                            className="p-2 rounded-lg bg-slate-900/60 border border-slate-800 flex items-center justify-between"
+                          >
+                            <div className="flex items-center gap-2">
+                              <span
+                                className={`px-1.5 py-0.2 rounded text-[9px] font-bold ${
+                                  isBuy
+                                    ? 'bg-emerald-500/20 text-emerald-400'
+                                    : isShort
+                                    ? 'bg-rose-500/20 text-rose-400'
+                                    : 'bg-amber-500/20 text-amber-400'
+                                }`}
+                              >
+                                {ord.side}
+                              </span>
+                              <span className="font-semibold text-white">{ord.symbol}</span>
+                              <span className="text-slate-400 text-[10px]">
+                                {ord.quantity}x @ {currency}{ord.price.toFixed(2)}
+                              </span>
+                            </div>
+                            <div className="text-[10px] text-slate-400">
+                              {ord.timestamp ? new Date(ord.timestamp).toLocaleTimeString() : 'Just now'}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </div>

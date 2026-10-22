@@ -25,7 +25,10 @@ import {
   BarChart3,
   CheckCircle2,
   Clock,
+  Flame,
+  Database,
 } from 'lucide-react';
+import { useRealtimeTrading } from '@/hooks/useRealtimeTrading';
 
 interface PortfolioItem {
   id: string;
@@ -50,6 +53,15 @@ export default function Portfolio() {
   const [activeTab, setActiveTab] = useState<'HOLDINGS' | 'POSITIONS' | 'ORDERS' | 'ANALYTICS'>('HOLDINGS');
   const [isResetting, setIsResetting] = useState(false);
 
+  // Firebase Realtime Database Live Sync
+  const {
+    balance: rtdbBalance,
+    positions: rtdbPositions,
+    userOrders: rtdbOrders,
+    liveTrades: rtdbLiveTrades,
+    isConnected: rtdbConnected,
+  } = useRealtimeTrading();
+
   // Trading Modal State
   const [modalOpen, setModalOpen] = useState(false);
   const [modalStock, setModalStock] = useState({
@@ -63,6 +75,13 @@ export default function Portfolio() {
   useEffect(() => {
     fetchPortfolio();
   }, []);
+
+  // When live orders trigger in RTDB, re-sync Firestore state
+  useEffect(() => {
+    if (rtdbOrders.length > 0) {
+      fetchPortfolio();
+    }
+  }, [rtdbOrders.length]);
 
   const fetchPortfolio = async () => {
     try {
@@ -183,14 +202,23 @@ export default function Portfolio() {
             <span className="text-xs text-slate-400">Base ₹1,00,000 + Net P&L</span>
           </div>
 
-          <div className="bg-slate-900/70 border border-slate-800/80 rounded-2xl p-5 shadow-lg">
-            <span className="text-xs font-bold uppercase tracking-wider text-slate-400 block mb-2">
-              Available Cash Margin
-            </span>
-            <div className="text-2xl font-black font-mono text-emerald-400 mb-1">
-              ₹{balance.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+          <div className="bg-slate-900/70 border border-slate-800/80 rounded-2xl p-5 shadow-lg relative overflow-hidden">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                Available Cash Margin
+              </span>
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                <Flame className="w-3 h-3 text-amber-400" />
+                RTDB Live
+              </span>
             </div>
-            <span className="text-xs text-slate-400">Ready for MIS orders</span>
+            <div className="text-2xl font-black font-mono text-emerald-400 mb-1">
+              ₹{((rtdbBalance ?? 0) > 0 ? (rtdbBalance ?? balance) : balance).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+            </div>
+            <span className="text-xs text-slate-400 flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              0ms sync • Ready for MIS orders
+            </span>
           </div>
 
           <div className="bg-slate-900/70 border border-slate-800/80 rounded-2xl p-5 shadow-lg">
@@ -242,6 +270,18 @@ export default function Portfolio() {
           >
             <Layers className="w-3.5 h-3.5" />
             <span>Positions (Intraday MIS & F&O) [{intradayPositions.length}]</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('ORDERS')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold font-mono transition-all flex items-center gap-2 ${
+              activeTab === 'ORDERS'
+                ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/30'
+                : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
+            }`}
+          >
+            <Flame className="w-3.5 h-3.5" />
+            <span>🔥 Live RTDB Stream [{rtdbPositions.length} Pos • {rtdbOrders.length} Orders]</span>
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping inline-block" />
           </button>
           <button
             onClick={() => setActiveTab('ANALYTICS')}
@@ -362,7 +402,208 @@ export default function Portfolio() {
           </div>
         )}
 
-        {/* Tab 3: Asset Allocation & Alpha Benchmark Analytics */}
+        {/* Tab 3: Firebase Realtime Database Live Stream */}
+        {activeTab === 'ORDERS' && (
+          <div className="space-y-6">
+            {/* RTDB Status Bar */}
+            <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400">
+                  <Flame className="w-5 h-5 animate-pulse" />
+                </div>
+                <div>
+                  <div className="text-sm font-bold text-white flex items-center gap-2">
+                    Firebase Realtime Database Stream
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                      LIVE 0ms
+                    </span>
+                  </div>
+                  <div className="text-xs text-slate-400 font-mono mt-0.5">
+                    URL: https://tradesphere-37a5c-default-rtdb.firebaseio.com
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-6 font-mono text-xs">
+                <div>
+                  <span className="text-slate-400 block text-[10px] uppercase">RTDB Cash</span>
+                  <span className="text-emerald-400 font-bold">
+                    ₹{((rtdbBalance ?? 0) > 0 ? (rtdbBalance ?? balance) : balance).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block text-[10px] uppercase">RTDB Positions</span>
+                  <span className="text-white font-bold">{rtdbPositions.length}</span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block text-[10px] uppercase">Trade Events</span>
+                  <span className="text-white font-bold">{rtdbOrders.length}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* RTDB Active Positions Card */}
+            <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-6 shadow-xl">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="text-base font-bold text-white flex items-center gap-2">
+                    <Layers className="w-4 h-4 text-amber-400" />
+                    Realtime Synced Positions
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Live positions maintained in <code className="text-amber-400">portfolios/{'{userId}'}</code>
+                  </p>
+                </div>
+                <span className="text-xs font-mono text-slate-400">{rtdbPositions.length} active</span>
+              </div>
+
+              {rtdbPositions.length === 0 ? (
+                <div className="py-12 text-center border border-dashed border-slate-800 rounded-xl text-xs text-slate-500 font-mono">
+                  No open positions currently registered in Firebase RTDB.
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="border-b border-slate-800 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                        <th className="pb-3 pl-2">Instrument</th>
+                        <th className="pb-3">Type</th>
+                        <th className="pb-3">Product</th>
+                        <th className="pb-3 text-right">Qty</th>
+                        <th className="pb-3 text-right">Avg Price</th>
+                        <th className="pb-3 text-right">LTP</th>
+                        <th className="pb-3 text-right">Live P&L</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/60 font-mono">
+                      {rtdbPositions.map((pos) => {
+                        const isShort = pos.positionType === 'SHORT';
+                        const currency = pos.symbol.endsWith('.NS') ? '₹' : '$';
+                        const current = pos.currentPrice || pos.avgPrice;
+                        const pnl = isShort
+                          ? (pos.avgPrice - current) * pos.quantity
+                          : (current - pos.avgPrice) * pos.quantity;
+                        const isUp = pnl >= 0;
+
+                        return (
+                          <tr key={pos.symbol} className="hover:bg-slate-800/30 transition-colors">
+                            <td className="py-3 pl-2 font-bold text-white">
+                              <Link href={`/stocks/${pos.symbol}`} className="hover:text-blue-400 flex items-center gap-1">
+                                {pos.symbol}
+                                <ExternalLink className="w-3 h-3 text-slate-500" />
+                              </Link>
+                            </td>
+                            <td className="py-3">
+                              <span
+                                className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                  isShort
+                                    ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
+                                    : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                                }`}
+                              >
+                                {pos.positionType || 'LONG'}
+                              </span>
+                            </td>
+                            <td className="py-3 text-slate-400 font-semibold">{pos.productType || 'MIS'}</td>
+                            <td className="py-3 text-right font-bold text-slate-200">{pos.quantity}</td>
+                            <td className="py-3 text-right text-slate-400">
+                              {currency}{pos.avgPrice.toFixed(2)}
+                            </td>
+                            <td className="py-3 text-right font-bold text-white">
+                              {currency}{current.toFixed(2)}
+                            </td>
+                            <td className={`py-3 text-right font-bold ${isUp ? 'text-emerald-400' : 'text-rose-400'}`}>
+                              {isUp ? '+' : ''}{currency}{pnl.toFixed(2)}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {/* RTDB Live Order Events Stream */}
+            <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-6 shadow-xl">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="text-base font-bold text-white flex items-center gap-2">
+                    <Activity className="w-4 h-4 text-emerald-400" />
+                    Live Order Execution Feed
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Broadcasted to <code className="text-emerald-400">orders/{'{userId}'}</code> and <code className="text-emerald-400">live_activity</code>
+                  </p>
+                </div>
+                <span className="text-xs font-mono text-slate-400">{rtdbOrders.length} events logged</span>
+              </div>
+
+              {rtdbOrders.length === 0 ? (
+                <div className="py-12 text-center border border-dashed border-slate-800 rounded-xl text-xs text-slate-500 font-mono">
+                  No order events received from Firebase Realtime Database yet.
+                </div>
+              ) : (
+                <div className="space-y-2 max-h-[400px] overflow-y-auto pr-1 scrollbar-none font-mono text-xs">
+                  {rtdbOrders.map((ord, idx) => {
+                    const isBuy = ord.side === 'BUY';
+                    const isShort = ord.side === 'SHORT';
+                    const currency = ord.symbol.endsWith('.NS') ? '₹' : '$';
+
+                    return (
+                      <div
+                        key={ord.orderId || `rtdb-ord-${idx}`}
+                        className="p-3 rounded-xl bg-slate-950/70 border border-slate-800/80 flex items-center justify-between"
+                      >
+                        <div className="flex items-center gap-3">
+                          <span
+                            className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                              isBuy
+                                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                                : isShort
+                                ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
+                                : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                            }`}
+                          >
+                            {ord.side}
+                          </span>
+                          <div>
+                            <div className="font-bold text-white flex items-center gap-1.5">
+                              <span>{ord.symbol}</span>
+                              <span className="text-slate-500 font-normal">
+                                {ord.quantity} shares @ {currency}{ord.price.toFixed(2)}
+                              </span>
+                            </div>
+                            <div className="text-[10px] text-slate-500">
+                              ID: {(ord.orderId || 'TXN').slice(0, 16)}... • Status: {ord.status || 'FILLED'}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="text-right">
+                          {ord.realizedPnL !== undefined && (
+                            <div
+                              className={`font-bold ${
+                                ord.realizedPnL >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                              }`}
+                            >
+                              {ord.realizedPnL >= 0 ? '+' : ''}{currency}{ord.realizedPnL.toFixed(2)}
+                            </div>
+                          )}
+                          <div className="text-[10px] text-slate-400">
+                            {ord.timestamp ? new Date(ord.timestamp).toLocaleTimeString() : 'Live'}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Tab 4: Asset Allocation & Alpha Benchmark Analytics */}
         {activeTab === 'ANALYTICS' && (
           <div className="space-y-6">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
