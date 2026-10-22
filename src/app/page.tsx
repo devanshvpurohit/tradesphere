@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { toast } from 'sonner';
 import { soundManager } from '@/lib/sound';
@@ -25,6 +25,7 @@ import {
   Terminal,
   Activity,
   Play,
+  Square,
   RotateCcw,
   Check,
   Target,
@@ -80,6 +81,21 @@ export default function Home() {
   const [decisionRules, setDecisionRules] = useState(PRESET_SYSTEM_PROMPTS[0].rules);
   const [isExecuting, setIsExecuting] = useState(false);
   const [executionResult, setExecutionResult] = useState<any>(null);
+
+  // Autonomous Continuous Runner State
+  const [isRunnerActive, setIsRunnerActive] = useState(false);
+  const [runnerCycle, setRunnerCycle] = useState(0);
+  const [countdown, setCountdown] = useState(20);
+  const runnerTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const countdownTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Stop runner cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (runnerTimerRef.current) clearInterval(runnerTimerRef.current);
+      if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
+    };
+  }, []);
 
   // Fetch live market prices from explore market API
   useEffect(() => {
@@ -148,6 +164,39 @@ export default function Home() {
     } finally {
       setIsExecuting(false);
     }
+  };
+
+  const startAgentRunner = () => {
+    setIsRunnerActive(true);
+    setRunnerCycle(1);
+    setCountdown(20);
+    toast.success('AI Agent Started!', {
+      description: `Autonomous loop monitoring ${selectedStock} every 20 seconds.`,
+    });
+
+    // Execute first cycle immediately
+    handleRunAIBroker();
+
+    // Start 20s execution loop
+    runnerTimerRef.current = setInterval(() => {
+      setRunnerCycle((prev) => prev + 1);
+      setCountdown(20);
+      handleRunAIBroker();
+    }, 20000);
+
+    // 1-second countdown display
+    countdownTimerRef.current = setInterval(() => {
+      setCountdown((prev) => (prev > 1 ? prev - 1 : 20));
+    }, 1000);
+  };
+
+  const stopAgentRunner = () => {
+    setIsRunnerActive(false);
+    if (runnerTimerRef.current) clearInterval(runnerTimerRef.current);
+    if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
+    toast.info('AI Agent Stopped', {
+      description: 'Autonomous trading loop has been paused.',
+    });
   };
 
   const currentStockObj = stocks.find((s) => s.symbol === selectedStock) || stocks[0];
@@ -478,27 +527,68 @@ export default function Home() {
               </div>
 
               <div className="space-y-3 pt-3 border-t border-slate-800">
-                <button
-                  onClick={handleRunAIBroker}
-                  disabled={isExecuting}
-                  className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold font-mono text-xs shadow-lg shadow-blue-600/30 active:scale-95 transition-all flex items-center justify-center gap-2 disabled:opacity-60"
-                >
-                  {isExecuting ? (
-                    <>
-                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                      <span>AI Synthesizing & Executing User Action...</span>
-                    </>
+                {/* Active Runner Status Ribbon (if active) */}
+                {isRunnerActive && (
+                  <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/40 flex items-center justify-between text-xs animate-in fade-in">
+                    <div className="flex items-center gap-2">
+                      <span className="relative flex h-2.5 w-2.5">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                      </span>
+                      <span className="font-bold text-emerald-400 uppercase tracking-wide">
+                        AI Agent Active (Cycle #{runnerCycle})
+                      </span>
+                    </div>
+                    <div className="text-[11px] font-mono text-slate-300">
+                      Next check in <span className="text-emerald-400 font-bold">{countdown}s</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Primary START AI AGENT Action Buttons */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  {/* Single Execution START Button */}
+                  <button
+                    onClick={handleRunAIBroker}
+                    disabled={isExecuting}
+                    className="w-full py-4 px-4 rounded-xl bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-600 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black font-mono text-xs uppercase tracking-wider shadow-lg shadow-emerald-500/25 active:scale-95 transition-all flex items-center justify-center gap-2 disabled:opacity-60"
+                  >
+                    {isExecuting ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-slate-950/30 border-t-slate-950 rounded-full animate-spin" />
+                        <span>Executing Order...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Play className="w-4 h-4 fill-slate-950" />
+                        <span>Start AI Agent (Execute)</span>
+                      </>
+                    )}
+                  </button>
+
+                  {/* Continuous Live Runner Toggle START/STOP Button */}
+                  {isRunnerActive ? (
+                    <button
+                      onClick={stopAgentRunner}
+                      className="w-full py-4 px-4 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-black font-mono text-xs uppercase tracking-wider shadow-lg shadow-rose-600/30 active:scale-95 transition-all flex items-center justify-center gap-2"
+                    >
+                      <Square className="w-4 h-4 fill-white" />
+                      <span>Stop AI Agent</span>
+                    </button>
                   ) : (
-                    <>
-                      <Zap className="w-4 h-4 text-yellow-400" />
-                      <span>Run AI Agent (Execute Buy/Sell)</span>
-                    </>
+                    <button
+                      onClick={startAgentRunner}
+                      className="w-full py-4 px-4 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-black font-mono text-xs uppercase tracking-wider shadow-lg shadow-blue-600/25 active:scale-95 transition-all flex items-center justify-center gap-2"
+                    >
+                      <Zap className="w-4 h-4 fill-white" />
+                      <span>Start Continuous Agent</span>
+                    </button>
                   )}
-                </button>
+                </div>
 
                 <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono">
-                  <span>Leverage: MIS 5x</span>
-                  <Link href="/portfolio" className="text-blue-400 hover:underline">
+                  <span>Leverage: MIS 5x Intraday</span>
+                  <Link href="/portfolio" className="text-emerald-400 hover:underline">
                     View Portfolio Ledger →
                   </Link>
                 </div>

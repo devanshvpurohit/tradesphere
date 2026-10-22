@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Sidebar from '@/components/Sidebar';
 import TopNav from '@/components/TopNav';
 import { toast } from 'sonner';
@@ -9,6 +9,7 @@ import confetti from 'canvas-confetti';
 import {
   Cpu,
   Play,
+  Square,
   RotateCcw,
   Sparkles,
   Bot,
@@ -118,6 +119,20 @@ export default function AgentPlayground() {
   const [emailRecipient, setEmailRecipient] = useState('dev7anshvpurohit@gmail.com');
   const [emailSending, setEmailSending] = useState(false);
   const [emailPreviewHtml, setEmailPreviewHtml] = useState<string | null>(null);
+
+  // Autonomous Continuous Agent Runner State
+  const [isRunnerActive, setIsRunnerActive] = useState(false);
+  const [runnerCycle, setRunnerCycle] = useState(0);
+  const [countdown, setCountdown] = useState(20);
+  const runnerTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const countdownTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (runnerTimerRef.current) clearInterval(runnerTimerRef.current);
+      if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
+    };
+  }, []);
 
   // Dynamic fetch models for API key / provider
   const fetchModelsForKey = async (provider: AIProvider, key: string, ollamaUrl?: string) => {
@@ -476,6 +491,39 @@ Strictly return your final decision as a JSON object.`
     } finally {
       setEvaluating(false);
     }
+  };
+
+  const startAgentRunner = () => {
+    setIsRunnerActive(true);
+    setRunnerCycle(1);
+    setCountdown(20);
+    toast.success('AI Agent Started!', {
+      description: `Autonomous loop monitoring ${evalSymbol} every 20 seconds.`,
+    });
+
+    // Execute first evaluation immediately
+    handleRunAgentEvaluation();
+
+    // Start 20s interval
+    runnerTimerRef.current = setInterval(() => {
+      setRunnerCycle((prev) => prev + 1);
+      setCountdown(20);
+      handleRunAgentEvaluation();
+    }, 20000);
+
+    // 1-second countdown display
+    countdownTimerRef.current = setInterval(() => {
+      setCountdown((prev) => (prev > 1 ? prev - 1 : 20));
+    }, 1000);
+  };
+
+  const stopAgentRunner = () => {
+    setIsRunnerActive(false);
+    if (runnerTimerRef.current) clearInterval(runnerTimerRef.current);
+    if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
+    toast.info('AI Agent Stopped', {
+      description: 'Autonomous trading loop has been paused.',
+    });
   };
 
   const handleSendEmailReport = async () => {
@@ -995,33 +1043,62 @@ Strictly return your final decision as a JSON object.`
                   </div>
                 </div>
 
-                {/* Big Evaluate Action Button */}
-                <button
-                  onClick={handleRunAgentEvaluation}
-                  disabled={evaluating}
-                  className={`w-full py-3.5 text-white font-bold text-xs rounded-xl shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2 ${
-                    autoPilotBroker
-                      ? 'bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-500 hover:from-emerald-500 hover:to-teal-500 shadow-emerald-600/30 ring-1 ring-emerald-500/50'
-                      : 'bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-500 hover:from-blue-500 hover:to-indigo-500 shadow-blue-600/30'
-                  } ${evaluating ? 'opacity-70 cursor-not-allowed' : ''}`}
-                >
-                  {evaluating ? (
-                    <>
-                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                      <span>{activeAgent.name} is evaluating rules &amp; executing...</span>
-                    </>
-                  ) : autoPilotBroker ? (
-                    <>
-                      <Zap className="w-4 h-4 fill-white animate-pulse" />
-                      <span>⚡ Run Autonomous Broker Execution ({evalSymbol})</span>
-                    </>
+                {/* Active Runner Status Ribbon */}
+                {isRunnerActive && (
+                  <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/40 flex items-center justify-between text-xs animate-in fade-in">
+                    <div className="flex items-center gap-2">
+                      <span className="relative flex h-2.5 w-2.5">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                      </span>
+                      <span className="font-bold text-emerald-400 uppercase tracking-wide">
+                        Runner Active (Cycle #{runnerCycle})
+                      </span>
+                    </div>
+                    <div className="text-[11px] font-mono text-slate-300">
+                      Next check in <span className="text-emerald-400 font-bold">{countdown}s</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Big Action Buttons: START AI AGENT (RUN NOW) & START CONTINUOUS RUNNER */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <button
+                    onClick={handleRunAgentEvaluation}
+                    disabled={evaluating}
+                    className="w-full py-4 text-slate-950 font-black font-mono text-xs uppercase tracking-wider rounded-xl shadow-xl shadow-emerald-500/25 active:scale-95 transition-all flex items-center justify-center gap-2 bg-gradient-to-r from-emerald-400 via-teal-400 to-emerald-500 hover:from-emerald-300 hover:to-teal-300 disabled:opacity-60"
+                  >
+                    {evaluating ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-slate-950/30 border-t-slate-950 rounded-full animate-spin" />
+                        <span>Evaluating...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Play className="w-4 h-4 fill-slate-950" />
+                        <span>Start AI Agent ({evalSymbol})</span>
+                      </>
+                    )}
+                  </button>
+
+                  {isRunnerActive ? (
+                    <button
+                      onClick={stopAgentRunner}
+                      className="w-full py-4 text-white font-black font-mono text-xs uppercase tracking-wider rounded-xl shadow-xl shadow-rose-600/30 active:scale-95 transition-all flex items-center justify-center gap-2 bg-rose-600 hover:bg-rose-500"
+                    >
+                      <Square className="w-4 h-4 fill-white" />
+                      <span>Stop Agent Runner</span>
+                    </button>
                   ) : (
-                    <>
+                    <button
+                      onClick={startAgentRunner}
+                      className="w-full py-4 text-white font-black font-mono text-xs uppercase tracking-wider rounded-xl shadow-xl shadow-blue-600/30 active:scale-95 transition-all flex items-center justify-center gap-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500"
+                    >
                       <Zap className="w-4 h-4 fill-white" />
-                      <span>Evaluate Market with {activeAgent.name}</span>
-                    </>
+                      <span>Start Continuous Loop</span>
+                    </button>
                   )}
-                </button>
+                </div>
               </div>
 
               {/* Right Column (7 cols): Live Evaluation Signal & Trade Execution Desk */}
