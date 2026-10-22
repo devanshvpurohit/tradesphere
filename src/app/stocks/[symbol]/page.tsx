@@ -68,6 +68,14 @@ export default function StockDetail() {
   const [quickOrderLoading, setQuickOrderLoading] = useState(false);
   const [quickMsg, setQuickMsg] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
+  // Zerodha Kite Order Desk state
+  const [productType, setProductType] = useState<'MIS' | 'CNC'>('MIS');
+  const [orderType, setOrderType] = useState<'MARKET' | 'LIMIT' | 'SL' | 'SL-M'>('MARKET');
+  const [customPrice, setCustomPrice] = useState<number>(0);
+  const [bracketEnabled, setBracketEnabled] = useState(false);
+  const [targetPct, setTargetPct] = useState(3.0);
+  const [stopLossPct, setStopLossPct] = useState(1.5);
+
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<any> | null>(null);
 
@@ -205,6 +213,10 @@ export default function StockDetail() {
     setQuickOrderLoading(true);
     setQuickMsg(null);
 
+    const execPrice = orderType === 'LIMIT' || orderType === 'SL' ? (customPrice || quote.price) : quote.price;
+    const targetPrice = bracketEnabled ? Number((execPrice * (1 + (side === 'BUY' ? targetPct : -targetPct) / 100)).toFixed(2)) : undefined;
+    const stopLossPrice = bracketEnabled ? Number((execPrice * (1 - (side === 'BUY' ? stopLossPct : -stopLossPct) / 100)).toFixed(2)) : undefined;
+
     try {
       const res = await fetch('/api/trade/order', {
         method: 'POST',
@@ -213,8 +225,11 @@ export default function StockDetail() {
           symbol: quote.symbol,
           quantity: quickQty,
           orderSide: side,
-          orderType: 'MARKET',
-          productType: 'MIS',
+          orderType,
+          price: execPrice,
+          productType,
+          targetPrice,
+          stopLossPrice,
         }),
       });
 
@@ -222,7 +237,7 @@ export default function StockDetail() {
       if (res.ok && data.success) {
         soundManager.playOrderSuccess();
         toast.success(`Filled: ${side} ${quickQty} shares of ${symbol}`, {
-          description: `Executed at ₹${(data.order?.executedPrice || quote.price).toFixed(2)} (MIS Intraday)`,
+          description: `Executed at ₹${(data.order?.executedPrice || quote.price).toFixed(2)} (${productType} ${orderType})`,
         });
 
         confetti({
@@ -232,7 +247,7 @@ export default function StockDetail() {
         });
 
         setQuickMsg({
-          text: `Success: ${side} ${quickQty} shares at ₹${(data.order?.executedPrice || quote.price).toFixed(2)}`,
+          text: `Success: ${side} ${quickQty} shares at ₹${(data.order?.executedPrice || quote.price).toFixed(2)} [${productType}]`,
           type: 'success',
         });
       } else {
@@ -249,6 +264,26 @@ export default function StockDetail() {
       setQuickOrderLoading(false);
     }
   };
+
+  // Keyboard shortcut listener: Shift + B = Buy, Shift + S = Sell
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const activeEl = document.activeElement?.tagName;
+      if (activeEl === 'INPUT' || activeEl === 'TEXTAREA') return;
+
+      if (e.shiftKey && (e.key === 'B' || e.key === 'b')) {
+        e.preventDefault();
+        setQuickSide('BUY');
+        handleQuickOrder('BUY');
+      } else if (e.shiftKey && (e.key === 'S' || e.key === 's')) {
+        e.preventDefault();
+        setQuickSide('SELL');
+        handleQuickOrder('SELL');
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [quote, quickQty, productType, orderType, customPrice, bracketEnabled, targetPct, stopLossPct]);
 
   const isUp = (quote?.change ?? 0) >= 0;
   const currency = symbol.endsWith('.NS') ? '₹' : '$';
@@ -470,27 +505,56 @@ export default function StockDetail() {
             </div>
           </div>
 
-          {/* Quick Order Terminal Beside Chart (Col Span 1) */}
-          <div className="bg-slate-900/70 border border-slate-800/80 rounded-2xl p-6 shadow-xl flex flex-col justify-between">
+          {/* Zerodha Kite-Inspired Side Order Desk (Col Span 1) */}
+          <div className="bg-[#0c121e] border border-slate-800/80 rounded-2xl p-5 shadow-2xl flex flex-col justify-between">
             <div>
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-base font-bold text-white flex items-center gap-2">
-                  <Zap className="w-4 h-4 text-yellow-400" />
-                  Instant Order Desk
-                </h3>
-                <span className="text-[10px] font-mono text-emerald-400 uppercase font-bold">
-                  Instant Fill
-                </span>
+              <div className="flex items-center justify-between mb-3 pb-2 border-b border-slate-800">
+                <div className="flex items-center gap-2">
+                  <Zap className="w-4 h-4 text-blue-400" />
+                  <h3 className="text-sm font-bold text-white uppercase tracking-wider">Order Execution Desk</h3>
+                </div>
+                <div className="flex items-center gap-1.5 text-[10px] font-mono text-slate-400">
+                  <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-bold">Shift+B</span>
+                  <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-bold">Shift+S</span>
+                </div>
+              </div>
+
+              {/* Product Selection: MIS vs CNC */}
+              <div className="grid grid-cols-2 p-1 bg-slate-950 rounded-xl mb-3 border border-slate-800/80 text-xs font-mono font-bold">
+                <button
+                  type="button"
+                  onClick={() => setProductType('MIS')}
+                  className={`py-1.5 rounded-lg transition-all flex flex-col items-center ${
+                    productType === 'MIS'
+                      ? 'bg-blue-600 text-white shadow'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <span>MIS (Intraday)</span>
+                  <span className="text-[9px] font-normal opacity-80">5x Leverage</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setProductType('CNC')}
+                  className={`py-1.5 rounded-lg transition-all flex flex-col items-center ${
+                    productType === 'CNC'
+                      ? 'bg-blue-600 text-white shadow'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <span>CNC (Delivery)</span>
+                  <span className="text-[9px] font-normal opacity-80">1x Capital</span>
+                </button>
               </div>
 
               {/* Order Side Toggle */}
-              <div className="grid grid-cols-2 p-1 bg-slate-950 rounded-xl mb-4 border border-slate-800">
+              <div className="grid grid-cols-2 p-1 bg-slate-950 rounded-xl mb-3 border border-slate-800">
                 <button
                   type="button"
                   onClick={() => setQuickSide('BUY')}
                   className={`py-2 text-xs font-bold rounded-lg transition-all ${
                     quickSide === 'BUY'
-                      ? 'bg-blue-600 text-white shadow-md'
+                      ? 'bg-emerald-600 text-white shadow-md'
                       : 'text-slate-400 hover:text-white'
                   }`}
                 >
@@ -509,57 +573,145 @@ export default function StockDetail() {
                 </button>
               </div>
 
+              {/* Order Type Pills: MARKET, LIMIT, SL, SL-M */}
+              <div className="grid grid-cols-4 gap-1 p-1 bg-slate-950 rounded-xl mb-3 border border-slate-800 text-[10px] font-mono font-bold">
+                {(['MARKET', 'LIMIT', 'SL', 'SL-M'] as const).map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => setOrderType(t)}
+                    className={`py-1.5 rounded-lg transition-all ${
+                      orderType === t
+                        ? 'bg-slate-800 text-blue-400 font-bold border border-blue-500/30'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    {t}
+                  </button>
+                ))}
+              </div>
+
               {/* Quantity Stepper */}
-              <div className="mb-4">
-                <label className="text-xs font-semibold text-slate-300 block mb-1.5">
-                  Shares Quantity
-                </label>
+              <div className="mb-3">
+                <div className="flex justify-between text-xs text-slate-300 font-semibold mb-1">
+                  <span>Quantity</span>
+                  <span className="text-[10px] font-mono text-slate-400">Lot: 1 Share</span>
+                </div>
                 <div className="flex items-center gap-2">
                   <input
                     type="number"
                     min="1"
                     value={quickQty}
                     onChange={(e) => setQuickQty(Math.max(1, parseInt(e.target.value) || 1))}
-                    className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 text-white text-base font-mono rounded-xl px-4 py-2 outline-none"
+                    className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 text-white text-sm font-mono rounded-xl px-3 py-1.5 outline-none"
                   />
                   <button
                     type="button"
                     onClick={() => setQuickQty((q) => q + 10)}
-                    className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-mono font-bold rounded-xl whitespace-nowrap"
+                    className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-mono font-bold rounded-xl whitespace-nowrap"
                   >
                     +10
                   </button>
                   <button
                     type="button"
                     onClick={() => setQuickQty((q) => q + 50)}
-                    className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-mono font-bold rounded-xl whitespace-nowrap"
+                    className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-mono font-bold rounded-xl whitespace-nowrap"
                   >
                     +50
                   </button>
                 </div>
               </div>
 
-              {/* Order Cost calculation */}
-              <div className="p-3.5 bg-slate-950/60 rounded-xl border border-slate-800/80 mb-4 space-y-2 font-mono text-xs">
-                <div className="flex justify-between text-slate-400">
-                  <span>Execution Price:</span>
-                  <span className="text-white">₹{(quote?.price || 0).toFixed(2)}</span>
+              {/* Price input if LIMIT or SL */}
+              {(orderType === 'LIMIT' || orderType === 'SL') && (
+                <div className="mb-3">
+                  <label className="text-xs font-semibold text-slate-300 block mb-1">
+                    {orderType} Price (₹)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.05"
+                    value={customPrice || (quote?.price || 0)}
+                    onChange={(e) => setCustomPrice(parseFloat(e.target.value) || 0)}
+                    className="w-full bg-slate-950 border border-slate-800 focus:border-blue-500 text-white text-sm font-mono rounded-xl px-3 py-1.5 outline-none"
+                  />
                 </div>
-                <div className="flex justify-between text-slate-400">
-                  <span>Order Type:</span>
-                  <span className="text-white font-semibold">MARKET (MIS)</span>
+              )}
+
+              {/* Smart GTT Bracket Trigger Toggle */}
+              <div className="mb-3 p-3 bg-slate-950/70 rounded-xl border border-slate-800/80">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-bold text-slate-200">GTT Bracket (SL & Target)</span>
+                  <input
+                    type="checkbox"
+                    checked={bracketEnabled}
+                    onChange={(e) => setBracketEnabled(e.target.checked)}
+                    className="w-4 h-4 rounded text-blue-600 bg-slate-900 border-slate-700 cursor-pointer"
+                  />
                 </div>
-                <div className="flex justify-between text-slate-200 font-bold pt-2 border-t border-slate-800">
-                  <span>Estimated Total:</span>
+
+                {bracketEnabled && (
+                  <div className="space-y-2 pt-2 border-t border-slate-800 text-[11px] font-mono">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-rose-400">Stop-Loss (-%)</span>
+                      <input
+                        type="number"
+                        step="0.5"
+                        min="0.5"
+                        max="20"
+                        value={stopLossPct}
+                        onChange={(e) => setStopLossPct(parseFloat(e.target.value) || 1)}
+                        className="w-16 bg-slate-900 border border-slate-700 text-right px-2 py-0.5 rounded text-white"
+                      />
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-emerald-400">Target (+%)</span>
+                      <input
+                        type="number"
+                        step="0.5"
+                        min="0.5"
+                        max="50"
+                        value={targetPct}
+                        onChange={(e) => setTargetPct(parseFloat(e.target.value) || 2)}
+                        className="w-16 bg-slate-900 border border-slate-700 text-right px-2 py-0.5 rounded text-white"
+                      />
+                    </div>
+                    <div className="flex justify-between text-slate-400 pt-1 text-[10px]">
+                      <span>Risk-to-Reward:</span>
+                      <span className="text-blue-400 font-bold">1 : {(targetPct / (stopLossPct || 1)).toFixed(2)}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Order Cost & Required Margin calculation */}
+              <div className="p-3 bg-slate-950/80 rounded-xl border border-slate-800/80 mb-3 space-y-1.5 font-mono text-xs">
+                <div className="flex justify-between text-slate-400 text-[11px]">
+                  <span>Total Order Value:</span>
+                  <span className="text-slate-200 font-bold">
+                    ₹{((quote?.price || 0) * quickQty).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                  </span>
+                </div>
+                <div className="flex justify-between text-slate-200 font-bold pt-1.5 border-t border-slate-800">
+                  <span className="flex items-center gap-1">
+                    <span>Margin Required:</span>
+                    {productType === 'MIS' && (
+                      <span className="text-[9px] px-1 py-0.2 rounded bg-blue-500/20 text-blue-400">5x</span>
+                    )}
+                  </span>
                   <span className="text-emerald-400">
-                    ₹{((quote?.price || 0) * quickQty).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                    ₹{(
+                      productType === 'MIS'
+                        ? ((quote?.price || 0) * quickQty) / 5
+                        : (quote?.price || 0) * quickQty
+                    ).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
                   </span>
                 </div>
               </div>
 
               {quickMsg && (
                 <div
-                  className={`p-3 rounded-xl text-xs mb-4 flex items-center gap-2 ${
+                  className={`p-2.5 rounded-xl text-xs mb-3 flex items-center gap-2 ${
                     quickMsg.type === 'success'
                       ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-300'
                       : 'bg-rose-500/10 border border-rose-500/20 text-rose-300'
@@ -575,14 +727,14 @@ export default function StockDetail() {
               )}
             </div>
 
-            <div className="space-y-2">
+            <div className="space-y-2 pt-2">
               <button
                 type="button"
                 onClick={() => handleQuickOrder(quickSide)}
                 disabled={quickOrderLoading}
                 className={`w-full py-3 px-4 rounded-xl text-white font-bold text-xs tracking-wide shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2 ${
                   quickSide === 'BUY'
-                    ? 'bg-blue-600 hover:bg-blue-500 shadow-blue-600/30'
+                    ? 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-600/30'
                     : 'bg-rose-600 hover:bg-rose-500 shadow-rose-600/30'
                 } ${quickOrderLoading ? 'opacity-70 cursor-not-allowed' : ''}`}
               >
@@ -590,7 +742,7 @@ export default function StockDetail() {
                   <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                 ) : (
                   <span>
-                    QUICK {quickSide} {quickQty} SHARES
+                    EXECUTE {quickSide} {quickQty} ({productType} {orderType})
                   </span>
                 )}
               </button>
@@ -601,9 +753,9 @@ export default function StockDetail() {
                   setModalSide(quickSide);
                   setModalOpen(true);
                 }}
-                className="w-full py-2 text-center text-xs text-slate-400 hover:text-white font-semibold transition-colors"
+                className="w-full py-1.5 text-center text-[11px] text-slate-400 hover:text-white font-semibold transition-colors"
               >
-                Open Full Order Panel (Limit / SL / Bracket) →
+                Advanced Order Dialog →
               </button>
             </div>
           </div>
@@ -707,6 +859,27 @@ export default function StockDetail() {
                 </div>
               </div>
             </div>
+
+            {/* Visual Order Book Balance Bar */}
+            {(() => {
+              const totalBids = bids.reduce((acc, b) => acc + b.qty, 0);
+              const totalAsks = asks.reduce((acc, a) => acc + a.qty, 0);
+              const total = totalBids + totalAsks || 1;
+              const bidPct = Math.round((totalBids / total) * 100);
+              const askPct = 100 - bidPct;
+              return (
+                <div className="mt-4 pt-3 border-t border-slate-800">
+                  <div className="flex justify-between text-[11px] font-mono mb-1.5">
+                    <span className="text-emerald-400 font-bold">Total Bids: {totalBids.toLocaleString()} ({bidPct}%)</span>
+                    <span className="text-rose-400 font-bold">Total Asks: {totalAsks.toLocaleString()} ({askPct}%)</span>
+                  </div>
+                  <div className="w-full h-2 rounded-full overflow-hidden flex bg-slate-800">
+                    <div style={{ width: `${bidPct}%` }} className="bg-emerald-500 transition-all duration-300" />
+                    <div style={{ width: `${askPct}%` }} className="bg-rose-500 transition-all duration-300" />
+                  </div>
+                </div>
+              );
+            })()}
           </div>
 
           {/* Key Fundamentals & Technical Overview */}

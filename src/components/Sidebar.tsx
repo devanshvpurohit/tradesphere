@@ -28,13 +28,16 @@ export default function Sidebar({ isOpen, onClose, onOpenTradingModal }: Sidebar
     if (path === '/stocks') {
       return pathname.startsWith('/stocks');
     }
+    if (path === '/agents' || path === '/agent-playground') {
+      return pathname === '/agents' || pathname === '/agent-playground';
+    }
     return pathname === path;
   };
 
   const navItems = [
     { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { path: '/stocks', label: 'Market Explorer', icon: CandlestickChart },
-    { path: '/agent-playground', label: 'AI Agent Playground', icon: Bot },
+    { path: '/agents', label: 'AI Quant Agent Studio', icon: Bot },
     { path: '/options', label: 'Options Desk (F&O)', icon: Target },
     { path: '/portfolio', label: 'Holdings / Portfolio', icon: Briefcase },
     { path: '/orders', label: 'Orders & Positions', icon: Layers },
