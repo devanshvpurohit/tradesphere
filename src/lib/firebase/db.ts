@@ -310,8 +310,8 @@ export class FirebaseDatabaseService {
           return result;
         });
       } catch (err: any) {
-        console.warn('Firestore buy transaction error:', err);
-        return { success: false, message: err.message || 'Failed to execute purchase' };
+        console.warn('Firestore buy transaction error, falling back to local simulation store:', err.message);
+        // Fall through to in-memory fallback
       }
     }
 
@@ -454,8 +454,8 @@ export class FirebaseDatabaseService {
           return result;
         });
       } catch (err: any) {
-        console.warn('Firestore sell transaction error:', err);
-        return { success: false, message: err.message || 'Failed to execute sale' };
+        console.warn('Firestore sell transaction error, falling back to local simulation store:', err.message);
+        // Fall through to in-memory fallback
       }
     }
 

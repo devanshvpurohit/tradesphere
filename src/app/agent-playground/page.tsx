@@ -37,6 +37,11 @@ import {
   Radio,
   Clock,
   ArrowRight,
+  Mail,
+  Send,
+  FileText,
+  ShieldCheck,
+  CheckCircle,
 } from 'lucide-react';
 import { AGENT_TEMPLATES, BacktestResult } from '@/lib/agents/engine';
 import {
@@ -101,6 +106,18 @@ export default function AgentPlayground() {
 
   // User portfolio cash
   const [portfolioBalance, setPortfolioBalance] = useState<number>(1000000);
+
+  // Autonomous Broker Mode & Email State
+  const [autoPilotBroker, setAutoPilotBroker] = useState<boolean>(true);
+  const [sendGmailAlert, setSendGmailAlert] = useState<boolean>(false);
+  const [brokerNote, setBrokerNote] = useState<string>('');
+  const [brokerAuditLogs, setBrokerAuditLogs] = useState<
+    Array<{ id: string; time: string; text: string; side: string }>
+  >([]);
+  const [isEmailModalOpen, setIsEmailModalOpen] = useState(false);
+  const [emailRecipient, setEmailRecipient] = useState('dev7anshvpurohit@gmail.com');
+  const [emailSending, setEmailSending] = useState(false);
+  const [emailPreviewHtml, setEmailPreviewHtml] = useState<string | null>(null);
 
   // Dynamic fetch models for API key / provider
   const fetchModelsForKey = async (provider: AIProvider, key: string, ollamaUrl?: string) => {
@@ -374,12 +391,15 @@ Strictly return your final decision as a JSON object.`
     });
 
     try {
-      const res = await fetch('/api/agents/llm-decision', {
+      const endpoint = autoPilotBroker ? '/api/agents/broker-execute' : '/api/agents/llm-decision';
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           agent: activeAgent,
           symbol: evalSymbol,
+          autoExecute: autoPilotBroker,
+          sendGmailAlert,
           portfolio: {
             availableCash: portfolioBalance,
             currentHoldingQuantity: 0,
@@ -394,9 +414,38 @@ Strictly return your final decision as a JSON object.`
         setDecision(data.decision);
         setDecisionQuote(data.quote);
         setDecisionIndicators(data.indicators);
+        if (data.brokerNote) setBrokerNote(data.brokerNote);
+
         soundManager.playOrderSuccess();
 
-        if (data.decision.action === 'BUY') {
+        if (autoPilotBroker && data.executed) {
+          confetti({
+            particleCount: 60,
+            spread: 75,
+            origin: { y: 0.6 },
+          });
+          toast.success(`⚡ [Autonomous Broker Executed]: ${data.decision.action} ${evalSymbol}`, {
+            description: data.brokerNote,
+          });
+
+          // Append to broker audit log
+          setBrokerAuditLogs((prev) => [
+            {
+              id: `log_${Date.now()}`,
+              time: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+              text: data.brokerNote,
+              side: data.decision.action,
+            },
+            ...prev,
+          ]);
+
+          // Refresh balance
+          fetch('/api/portfolio')
+            .then((r) => r.json())
+            .then((d) => {
+              if (d?.portfolio?.balance) setPortfolioBalance(d.portfolio.balance);
+            });
+        } else if (data.decision.action === 'BUY') {
           confetti({
             particleCount: 40,
             spread: 60,
@@ -426,6 +475,54 @@ Strictly return your final decision as a JSON object.`
       toast.error('Evaluation Error', { description: err.message || 'Network request failed' });
     } finally {
       setEvaluating(false);
+    }
+  };
+
+  const handleSendEmailReport = async () => {
+    if (!emailRecipient || !emailRecipient.includes('@')) {
+      toast.error('Please enter a valid recipient email address');
+      return;
+    }
+
+    setEmailSending(true);
+    toast.loading(`Generating & dispatching contract note to ${emailRecipient}...`, { id: 'email-report' });
+
+    try {
+      const res = await fetch('/api/user/email-report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: emailRecipient,
+          brokerNotes: decision ? [
+            {
+              symbol: evalSymbol,
+              agentName: activeAgent.name,
+              action: decision.action,
+              rule: activeAgent.systemPrompt.slice(0, 120),
+              confidence: decision.confidence,
+              reasoning: decision.reasoning,
+            }
+          ] : undefined,
+        }),
+      });
+
+      const data = await res.json();
+      toast.dismiss('email-report');
+
+      if (res.ok && data.success) {
+        setEmailPreviewHtml(data.previewHtml || null);
+        soundManager.playOrderSuccess();
+        toast.success(`Contract note dispatched!`, {
+          description: data.message,
+        });
+      } else {
+        toast.error('Failed to send report', { description: data.error || data.message });
+      }
+    } catch (err: any) {
+      toast.dismiss('email-report');
+      toast.error('Error dispatching email', { description: err.message });
+    } finally {
+      setEmailSending(false);
     }
   };
 
@@ -582,41 +679,52 @@ Strictly return your final decision as a JSON object.`
             </p>
           </div>
 
-          {/* Mode Switcher Tabs */}
-          <div className="flex items-center p-1 bg-slate-950/90 border border-slate-800 rounded-xl self-start md:self-auto shadow-inner">
+          {/* Action CTAs: Gmail Report & Mode Switcher */}
+          <div className="flex flex-wrap items-center gap-2.5 self-start md:self-auto">
             <button
-              onClick={() => setPlaygroundMode('LLM_AGENTS')}
-              className={`px-3.5 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
-                playgroundMode === 'LLM_AGENTS'
-                  ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30'
-                  : 'text-slate-400 hover:text-white'
-              }`}
+              onClick={() => setIsEmailModalOpen(true)}
+              className="px-3.5 py-2 rounded-xl text-xs font-bold bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 hover:border-slate-600 transition-all flex items-center gap-1.5 shadow-md"
             >
-              <Bot className="w-3.5 h-3.5" />
-              <span>Custom AI Agents</span>
+              <Mail className="w-3.5 h-3.5 text-blue-400" />
+              <span>Gmail Report</span>
             </button>
-            <button
-              onClick={() => setPlaygroundMode('QUANT_CODE')}
-              className={`px-3.5 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
-                playgroundMode === 'QUANT_CODE'
-                  ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              <Code2 className="w-3.5 h-3.5" />
-              <span>Quant Script Sandbox</span>
-            </button>
-            <button
-              onClick={() => setPlaygroundMode('API_DOCS')}
-              className={`px-3.5 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
-                playgroundMode === 'API_DOCS'
-                  ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30'
-                  : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              <Terminal className="w-3.5 h-3.5" />
-              <span>Python Bot API</span>
-            </button>
+
+            {/* Mode Switcher Tabs */}
+            <div className="flex items-center p-1 bg-slate-950/90 border border-slate-800 rounded-xl shadow-inner">
+              <button
+                onClick={() => setPlaygroundMode('LLM_AGENTS')}
+                className={`px-3.5 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                  playgroundMode === 'LLM_AGENTS'
+                    ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Bot className="w-3.5 h-3.5" />
+                <span>Custom AI Agents</span>
+              </button>
+              <button
+                onClick={() => setPlaygroundMode('QUANT_CODE')}
+                className={`px-3.5 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                  playgroundMode === 'QUANT_CODE'
+                    ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Code2 className="w-3.5 h-3.5" />
+                <span>Quant Script Sandbox</span>
+              </button>
+              <button
+                onClick={() => setPlaygroundMode('API_DOCS')}
+                className={`px-3.5 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                  playgroundMode === 'API_DOCS'
+                    ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Terminal className="w-3.5 h-3.5" />
+                <span>Python Bot API</span>
+              </button>
+            </div>
           </div>
         </div>
 
@@ -844,11 +952,46 @@ Strictly return your final decision as a JSON object.`
                   </div>
 
                   {/* System Persona Snippet */}
-                  <div className="p-3 bg-slate-950/50 rounded-xl border border-slate-800/60 text-[11px] text-slate-400 font-mono mb-4">
-                    <span className="text-slate-300 font-bold block mb-1">Agent Directive:</span>
-                    <p className="line-clamp-4 leading-relaxed text-slate-400">
+                  <div className="p-3 bg-slate-950/50 rounded-xl border border-slate-800/60 text-[11px] text-slate-400 font-mono mb-3">
+                    <span className="text-slate-300 font-bold block mb-1">System Prompt &amp; Decision Rules:</span>
+                    <p className="line-clamp-3 leading-relaxed text-slate-400">
                       {activeAgent.systemPrompt}
                     </p>
+                  </div>
+
+                  {/* Autonomous Broker Mandate Switch */}
+                  <div className="p-3 bg-gradient-to-r from-blue-950/40 via-slate-900 to-indigo-950/30 rounded-xl border border-blue-500/30 mb-4">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <div className="flex items-center gap-1.5">
+                        <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                        <span className="text-xs font-bold text-white">Autonomous Broker Mode</span>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={autoPilotBroker}
+                          onChange={(e) => setAutoPilotBroker(e.target.checked)}
+                          className="sr-only peer"
+                        />
+                        <div className="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div>
+                      </label>
+                    </div>
+
+                    <p className="text-[10px] text-slate-400 leading-relaxed mb-2">
+                      {autoPilotBroker
+                        ? '⚡ Auto-Pilot Active: The agent acts as an authorized broker. It applies its Decision Rules and automatically executes BUY/SELL market orders directly into your virtual portfolio.'
+                        : 'Advisory Mode: The agent will output trading signals and suggested parameters for manual trade confirmation.'}
+                    </p>
+
+                    <label className="flex items-center gap-2 cursor-pointer text-[10px] text-slate-300">
+                      <input
+                        type="checkbox"
+                        checked={sendGmailAlert}
+                        onChange={(e) => setSendGmailAlert(e.target.checked)}
+                        className="rounded border-slate-700 bg-slate-900 text-blue-500 focus:ring-0"
+                      />
+                      <span>📧 Auto-send Gmail Contract Note on trade execution</span>
+                    </label>
                   </div>
                 </div>
 
@@ -856,14 +999,21 @@ Strictly return your final decision as a JSON object.`
                 <button
                   onClick={handleRunAgentEvaluation}
                   disabled={evaluating}
-                  className={`w-full py-3.5 bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-500 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-blue-600/30 active:scale-95 transition-all flex items-center justify-center gap-2 ${
-                    evaluating ? 'opacity-70 cursor-not-allowed' : ''
-                  }`}
+                  className={`w-full py-3.5 text-white font-bold text-xs rounded-xl shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2 ${
+                    autoPilotBroker
+                      ? 'bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-500 hover:from-emerald-500 hover:to-teal-500 shadow-emerald-600/30 ring-1 ring-emerald-500/50'
+                      : 'bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-500 hover:from-blue-500 hover:to-indigo-500 shadow-blue-600/30'
+                  } ${evaluating ? 'opacity-70 cursor-not-allowed' : ''}`}
                 >
                   {evaluating ? (
                     <>
                       <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                      <span>{activeAgent.name} is reasoning over indicators...</span>
+                      <span>{activeAgent.name} is evaluating rules &amp; executing...</span>
+                    </>
+                  ) : autoPilotBroker ? (
+                    <>
+                      <Zap className="w-4 h-4 fill-white animate-pulse" />
+                      <span>⚡ Run Autonomous Broker Execution ({evalSymbol})</span>
                     </>
                   ) : (
                     <>
@@ -894,6 +1044,17 @@ Strictly return your final decision as a JSON object.`
 
                   {decision ? (
                     <div className="space-y-4">
+                      {/* Autonomous Broker Ticket Banner */}
+                      {brokerNote && (
+                        <div className="p-3.5 bg-gradient-to-r from-emerald-950/40 via-slate-950 to-emerald-950/20 border border-emerald-500/40 rounded-xl text-xs font-mono text-emerald-300 flex items-start gap-2.5 shadow-lg shadow-emerald-950/30">
+                          <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                          <div>
+                            <span className="font-bold text-white block mb-0.5">Autonomous Broker Ticket:</span>
+                            <span className="text-slate-200">{brokerNote}</span>
+                          </div>
+                        </div>
+                      )}
+
                       {/* Big Action Badge & Confidence Header */}
                       <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                         <div className="flex items-center gap-3">
@@ -1852,6 +2013,93 @@ print("Ollama Decision:", response['message']['content'])`}
               >
                 <Check className="w-4 h-4" />
                 <span>Save Agent</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* ============================================================== */}
+      {/* MODAL: DISPATCH GMAIL CONTRACT NOTE & REPORT                   */}
+      {/* ============================================================== */}
+      {isEmailModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
+          <div className="bg-[#0e1626] border border-slate-700/80 rounded-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto p-6 shadow-2xl text-slate-100 space-y-5">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2.5 rounded-xl bg-blue-500/20 text-blue-400">
+                  <Mail className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">
+                    Send Contract Note &amp; Report to Gmail
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Dispatches an institutional P&amp;L summary, holdings table &amp; broker executions.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsEmailModalOpen(false)}
+                className="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800 transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-4 text-xs">
+              <div>
+                <label className="font-bold text-slate-300 block mb-1">Recipient Gmail Address</label>
+                <input
+                  type="email"
+                  value={emailRecipient}
+                  onChange={(e) => setEmailRecipient(e.target.value)}
+                  placeholder="your.email@gmail.com"
+                  className="w-full bg-slate-950 border border-slate-700 focus:border-blue-500 rounded-xl px-3.5 py-2.5 text-white font-mono outline-none"
+                />
+                <span className="text-[10px] text-slate-500 mt-1 block">
+                  Report includes: Available Virtual Cash, Total Portfolio Value, Open Positions, and Broker Trade Log.
+                </span>
+              </div>
+
+              {emailPreviewHtml && (
+                <div>
+                  <label className="font-bold text-emerald-400 block mb-1.5 flex items-center gap-1">
+                    <FileText className="w-3.5 h-3.5" />
+                    <span>Contract Note HTML Preview</span>
+                  </label>
+                  <div
+                    className="p-3 bg-slate-950 rounded-xl border border-slate-800 max-h-48 overflow-y-auto font-mono text-[10px] text-slate-300"
+                    dangerouslySetInnerHTML={{ __html: emailPreviewHtml }}
+                  />
+                </div>
+              )}
+            </div>
+
+            <div className="pt-4 border-t border-slate-800 flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setIsEmailModalOpen(false)}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                onClick={handleSendEmailReport}
+                disabled={emailSending}
+                className="px-6 py-2.5 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-600/30 transition-all active:scale-95 flex items-center gap-1.5 disabled:opacity-60"
+              >
+                {emailSending ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    <span>Dispatching to Gmail...</span>
+                  </>
+                ) : (
+                  <>
+                    <Send className="w-3.5 h-3.5" />
+                    <span>Send Contract Note</span>
+                  </>
+                )}
               </button>
             </div>
           </div>
