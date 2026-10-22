@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { db } from '@/lib/firebase/client';
 import {
   doc,
@@ -8,6 +8,7 @@ import {
   query,
   where,
   onSnapshot,
+  setDoc,
   limit,
 } from 'firebase/firestore';
 
@@ -33,7 +34,16 @@ export interface RealtimePositionItem {
   updatedAt?: string;
 }
 
-export function useRealtimeTrading(userId: string = 'demo-user-123') {
+export function useRealtimeTrading(customUserId?: string) {
+  // Resolve active user: customUserId -> cookie/localStorage -> fallback 'demo-user-123'
+  const userId =
+    customUserId ||
+    (typeof window !== 'undefined'
+      ? document.cookie.match(/tradesphere_uid=([^;]+)/)?.[1] ||
+        localStorage.getItem('tradesphere_demo_id') ||
+        'demo-user-123'
+      : 'demo-user-123');
+
   const [balance, setBalance] = useState<number>(100000);
   const [positions, setPositions] = useState<RealtimePositionItem[]>([]);
   const [userOrders, setUserOrders] = useState<RealtimeTradeEvent[]>([]);
@@ -62,6 +72,19 @@ export function useRealtimeTrading(userId: string = 'demo-user-123') {
               setIsConnected(true);
               setLastSyncTime(new Date());
             }
+          } else {
+            // Auto-initialize account in Firestore with ₹1,00,000 virtual capital
+            setDoc(
+              userDocRef,
+              {
+                id: userId,
+                email: `${userId}@tradesphere.app`,
+                balance: 100000,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+              },
+              { merge: true }
+            ).catch(() => {});
           }
         },
         (error) => {
@@ -177,6 +200,81 @@ export function useRealtimeTrading(userId: string = 'demo-user-123') {
     };
   }, [userId]);
 
+  /**
+   * Seed demo portfolio & orders directly to Firestore so the user can immediately see live data
+   */
+  const seedSampleData = useCallback(async () => {
+    if (!db) return;
+    const now = new Date().toISOString();
+
+    const sampleHoldings = [
+      { symbol: 'RELIANCE.NS', quantity: 15, avgPrice: 2940.50, currentPrice: 2985.20, positionType: 'LONG' as const, productType: 'CNC' },
+      { symbol: 'TCS.NS', quantity: 10, avgPrice: 4120.00, currentPrice: 4190.50, positionType: 'LONG' as const, productType: 'CNC' },
+      { symbol: 'INFY.NS', quantity: 20, avgPrice: 1780.00, currentPrice: 1815.00, positionType: 'LONG' as const, productType: 'CNC' },
+      { symbol: 'HDFCBANK.NS', quantity: 25, avgPrice: 1650.00, currentPrice: 1682.00, positionType: 'LONG' as const, productType: 'MIS' },
+    ];
+
+    try {
+      // 1. Ensure user account document exists
+      await setDoc(doc(db, 'users', userId), {
+        id: userId,
+        email: `${userId}@tradesphere.app`,
+        balance: 78500,
+        createdAt: now,
+        updatedAt: now,
+      }, { merge: true });
+
+      // 2. Write sample holdings to Firestore 'portfolios' collection
+      for (const h of sampleHoldings) {
+        const docId = `${userId}_${h.symbol}`;
+        await setDoc(doc(db, 'portfolios', docId), {
+          id: docId,
+          userId,
+          stockSymbol: h.symbol,
+          quantity: h.quantity,
+          avgPrice: h.avgPrice,
+          currentPrice: h.currentPrice,
+          positionType: h.positionType,
+          productType: h.productType,
+          createdAt: now,
+          updatedAt: now,
+        });
+
+        // 3. Write corresponding execution orders
+        const orderId = `ord_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+        await setDoc(doc(db, 'orders', orderId), {
+          id: orderId,
+          userId,
+          stockSymbol: h.symbol,
+          type: 'BUY',
+          quantity: h.quantity,
+          price: h.avgPrice,
+          executedPrice: h.avgPrice,
+          status: 'EXECUTED',
+          productType: h.productType,
+          createdAt: now,
+          executedAt: now,
+        });
+
+        // 4. Write transaction log
+        const txnId = `txn_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+        await setDoc(doc(db, 'transactions', txnId), {
+          id: txnId,
+          userId,
+          stockSymbol: h.symbol,
+          type: 'BUY',
+          quantity: h.quantity,
+          price: h.avgPrice,
+          productType: h.productType,
+          createdAt: now,
+        });
+      }
+    } catch (err: any) {
+      console.error('Failed to seed sample data to Firestore:', err);
+      throw err;
+    }
+  }, [userId]);
+
   return {
     balance,
     positions,
@@ -184,5 +282,6 @@ export function useRealtimeTrading(userId: string = 'demo-user-123') {
     liveTrades,
     isConnected,
     lastSyncTime,
+    seedSampleData,
   };
 }

@@ -53,14 +53,16 @@ export default function Portfolio() {
   const [activeTab, setActiveTab] = useState<'HOLDINGS' | 'POSITIONS' | 'ORDERS' | 'ANALYTICS'>('HOLDINGS');
   const [isResetting, setIsResetting] = useState(false);
 
-  // Firebase Realtime Database Live Sync
+  // Firebase Cloud Firestore Live Sync
   const {
     balance: rtdbBalance,
     positions: rtdbPositions,
     userOrders: rtdbOrders,
     liveTrades: rtdbLiveTrades,
     isConnected: rtdbConnected,
+    seedSampleData,
   } = useRealtimeTrading();
+  const [isSeeding, setIsSeeding] = useState(false);
 
   // Trading Modal State
   const [modalOpen, setModalOpen] = useState(false);
@@ -100,6 +102,20 @@ export default function Portfolio() {
     }
   };
 
+  const handleSeedData = async () => {
+    setIsSeeding(true);
+    try {
+      await seedSampleData();
+      soundManager.playOrderSuccess();
+      toast.success('Live Demo Portfolio & Orders generated in Cloud Firestore!');
+      await fetchPortfolio();
+    } catch (err: any) {
+      toast.error('Could not write to Firestore. Please check Firestore security rules.');
+    } finally {
+      setIsSeeding(false);
+    }
+  };
+
   const handleResetCapital = async () => {
     if (!confirm('Are you sure you want to reset your portfolio capital to ₹1,00,000 and clear all positions?')) {
       return;
@@ -130,16 +146,50 @@ export default function Portfolio() {
     setModalOpen(true);
   };
 
-  const totalInvested = summary?.totalInvested ?? 0;
-  const totalCurrent = summary?.totalCurrent ?? 0;
-  const totalProfitLoss = summary?.totalProfitLoss ?? 0;
-  const totalProfitLossPercent = summary?.totalProfitLossPercent ?? 0;
-  const totalValue = summary?.totalValue ?? (balance + totalCurrent);
+  // Combine server portfolio or live Firestore onSnapshot positions
+  const effectivePortfolio: PortfolioItem[] =
+    portfolio.length > 0
+      ? portfolio
+      : rtdbPositions.map((p) => {
+          const current = p.currentPrice || p.avgPrice;
+          const invested = p.avgPrice * Math.abs(p.quantity);
+          const curVal = current * Math.abs(p.quantity);
+          const pnl =
+            p.positionType === 'SHORT'
+              ? (p.avgPrice - current) * Math.abs(p.quantity)
+              : (current - p.avgPrice) * Math.abs(p.quantity);
+          const pnlPct = invested > 0 ? (pnl / invested) * 100 : 0;
+          return {
+            id: `${p.symbol}`,
+            stockSymbol: p.symbol,
+            quantity: Math.abs(p.quantity),
+            avgPrice: p.avgPrice,
+            currentPrice: current,
+            currentValue: curVal,
+            investedValue: invested,
+            profitLoss: pnl,
+            profitLossPercent: pnlPct,
+            productType: (p.productType as 'MIS' | 'CNC') || 'CNC',
+          };
+        });
+
+  const effectiveBalance = (rtdbBalance ?? 0) > 0 ? (rtdbBalance ?? balance) : balance;
+  const totalInvested =
+    summary?.totalInvested ?? effectivePortfolio.reduce((acc, p) => acc + p.investedValue, 0);
+  const totalCurrent =
+    summary?.totalCurrent ?? effectivePortfolio.reduce((acc, p) => acc + p.currentValue, 0);
+  const totalProfitLoss = summary?.totalProfitLoss ?? (totalCurrent - totalInvested);
+  const totalProfitLossPercent = totalInvested > 0 ? (totalProfitLoss / totalInvested) * 100 : 0;
+  const totalValue = summary?.totalValue ?? (effectiveBalance + totalCurrent);
   const isProfitable = totalProfitLoss >= 0;
 
   // Filter holdings (CNC) vs positions (MIS / options)
-  const deliveryHoldings = portfolio.filter((p) => !p.stockSymbol.includes('CE') && !p.stockSymbol.includes('PE'));
-  const intradayPositions = portfolio.filter((p) => p.stockSymbol.includes('CE') || p.stockSymbol.includes('PE'));
+  const deliveryHoldings = effectivePortfolio.filter(
+    (p) => !p.stockSymbol.includes('CE') && !p.stockSymbol.includes('PE')
+  );
+  const intradayPositions = effectivePortfolio.filter(
+    (p) => p.stockSymbol.includes('CE') || p.stockSymbol.includes('PE')
+  );
 
   // Asset Allocation calculation
   const equityPct = totalValue > 0 ? Math.round((totalCurrent / totalValue) * 100) : 0;
@@ -171,6 +221,15 @@ export default function Portfolio() {
           </div>
 
           <div className="flex items-center gap-3">
+            <button
+              onClick={handleSeedData}
+              disabled={isSeeding}
+              className="px-3.5 py-2 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 rounded-xl text-xs font-mono font-semibold text-amber-400 hover:text-amber-300 transition-all flex items-center gap-2"
+              title="Write sample holdings (RELIANCE, TCS, INFY) to Firestore"
+            >
+              <Flame className={`w-3.5 h-3.5 ${isSeeding ? 'animate-spin' : ''}`} />
+              <span>{isSeeding ? 'Writing to Firestore...' : 'Populate Demo Data'}</span>
+            </button>
             <button
               onClick={handleResetCapital}
               disabled={isResetting}
@@ -322,15 +381,25 @@ export default function Portfolio() {
                   No Active {activeTab === 'HOLDINGS' ? 'Holdings' : 'Positions'} Found
                 </h3>
                 <p className="text-xs text-slate-400 mb-6 max-w-md mx-auto">
-                  Execute orders on the Trading Terminal or Options Desk to populate this ledger.
+                  Your Firestore portfolio is ready. Click below to load sample blue-chip positions (RELIANCE, TCS, INFY) or place trades on the Terminal.
                 </p>
-                <Link
-                  href="/stocks"
-                  className="inline-flex items-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold transition-all shadow-lg shadow-blue-600/20"
-                >
-                  <Zap className="w-4 h-4" />
-                  <span>Trade Equities</span>
-                </Link>
+                <div className="flex flex-wrap items-center justify-center gap-3">
+                  <button
+                    onClick={handleSeedData}
+                    disabled={isSeeding}
+                    className="inline-flex items-center gap-2 px-6 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-xs font-bold transition-all shadow-lg shadow-amber-500/20"
+                  >
+                    <Flame className={`w-4 h-4 ${isSeeding ? 'animate-spin' : ''}`} />
+                    <span>{isSeeding ? 'Writing to Firestore...' : '⚡ Populate Demo Holdings & Orders'}</span>
+                  </button>
+                  <Link
+                    href="/stocks"
+                    className="inline-flex items-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold transition-all shadow-lg shadow-blue-600/20"
+                  >
+                    <Zap className="w-4 h-4" />
+                    <span>Trade Equities</span>
+                  </Link>
+                </div>
               </div>
             ) : (
               <div className="overflow-x-auto">

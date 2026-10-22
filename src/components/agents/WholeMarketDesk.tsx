@@ -41,6 +41,8 @@ import {
   Database,
 } from 'lucide-react';
 import { useRealtimeTrading } from '@/hooks/useRealtimeTrading';
+import { db } from '@/lib/firebase/client';
+import { doc, setDoc } from 'firebase/firestore';
 import {
   MarketSignalRecord,
   WholeMarketExecutionItem,
@@ -473,6 +475,43 @@ export function WholeMarketDesk({
           soundManager.playOrderSuccess();
           confetti({ particleCount: 50, spread: 70, origin: { y: 0.6 } });
           setExecutionLogs((prev) => [...data.executions, ...prev].slice(0, 40));
+
+          // Mirror directly to Cloud Firestore so onSnapshot stream reflects immediately
+          if (db) {
+            const now = new Date().toISOString();
+            for (const item of data.executions) {
+              const docId = `ord_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+              setDoc(doc(db, 'orders', docId), {
+                id: docId,
+                userId: 'demo-user-123',
+                stockSymbol: item.symbol,
+                type: item.action,
+                quantity: item.quantity,
+                price: item.price,
+                executedPrice: item.price,
+                status: 'EXECUTED',
+                productType: productType,
+                realizedPnL: item.realizedPnL,
+                createdAt: now,
+                executedAt: now,
+              }).catch(console.warn);
+
+              const portId = `demo-user-123_${item.symbol}`;
+              setDoc(doc(db, 'portfolios', portId), {
+                id: portId,
+                userId: 'demo-user-123',
+                stockSymbol: item.symbol,
+                quantity: item.action === 'SHORT' ? -item.quantity : item.quantity,
+                avgPrice: item.price,
+                currentPrice: item.price,
+                positionType: item.action === 'SHORT' ? 'SHORT' : 'LONG',
+                productType: productType,
+                createdAt: now,
+                updatedAt: now,
+              }).catch(console.warn);
+            }
+          }
+
           toast.success(`Autonomous Quant Execution`, {
             description: `Executed ${data.executions.length} orders across the customized universe.`,
           });
