@@ -1,27 +1,18 @@
-import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
-
+import { NextRequest, NextResponse } from 'next/server';
+import { getAuthenticatedUser } from '@/lib/firebase/auth-helper';
 import { tradingService } from '@/services/tradingService';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
   try {
-    const supabase = createClient();
-    const { data: { user: authUser } } = await supabase.auth.getUser();
-    const session = authUser ? { user: authUser } : null;
+    const user = await getAuthenticatedUser(request);
 
-    if (!session?.user?.id) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      );
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { searchParams } = new URL(request.url);
-    const limit = parseInt(searchParams.get('limit') || '50');
-
-    const transactions = await tradingService.getTransactions(session.user.id, limit);
+    const transactions = await tradingService.getTransactions(user.id, 100);
 
     return NextResponse.json({ transactions });
   } catch (error) {

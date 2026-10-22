@@ -1,4 +1,4 @@
-import { prisma } from '@/lib/prisma';
+import { firebaseDb, PortfolioDoc, TransactionDoc } from '@/lib/firebase/db';
 import { marketService } from './marketService';
 
 export interface TradeResult {
@@ -8,192 +8,82 @@ export interface TradeResult {
   portfolio?: any;
 }
 
+export interface PortfolioItemWithQuote extends PortfolioDoc {
+  currentPrice: number;
+  currentValue: number;
+  investedValue: number;
+  profitLoss: number;
+  profitLossPercent: number;
+  changePercent?: number;
+}
+
 class TradingService {
-  async buyStock(userId: string, symbol: string, quantity: number): Promise<TradeResult> {
+  async buyStock(
+    userId: string,
+    symbol: string,
+    quantity: number,
+    productType: string = 'MIS',
+    orderType: string = 'MARKET',
+    specifiedPrice?: number
+  ): Promise<TradeResult> {
     try {
-      // Fetch current price
-      const stockPrice = await marketService.getStockPrice(symbol);
-      const totalCost = stockPrice.price * quantity;
-
-      // Get user balance
-      const user = await prisma.user.findUnique({
-        where: { id: userId },
-      });
-
-      if (!user) {
-        return { success: false, message: 'User not found' };
-      }
-
-      if (user.balance < totalCost) {
-        return { success: false, message: 'Insufficient balance' };
-      }
-
-      // Execute transaction
-      const result = await prisma.$transaction(async (tx) => {
-        // Deduct balance
-        const updatedUser = await tx.user.update({
-          where: { id: userId },
-          data: { balance: user.balance - totalCost },
-        });
-
-        // Update or create portfolio entry
-        const existingPortfolio = await tx.portfolio.findUnique({
-          where: {
-            userId_stockSymbol: {
-              userId,
-              stockSymbol: symbol,
-            },
-          },
-        });
-
-        let portfolio;
-        if (existingPortfolio) {
-          const newQuantity = existingPortfolio.quantity + quantity;
-          const newAvgPrice =
-            (existingPortfolio.avgPrice * existingPortfolio.quantity + totalCost) / newQuantity;
-
-          portfolio = await tx.portfolio.update({
-            where: { id: existingPortfolio.id },
-            data: {
-              quantity: newQuantity,
-              avgPrice: newAvgPrice,
-            },
-          });
-        } else {
-          portfolio = await tx.portfolio.create({
-            data: {
-              userId,
-              stockSymbol: symbol,
-              quantity,
-              avgPrice: stockPrice.price,
-            },
-          });
-        }
-
-        // Log transaction
-        await tx.transaction.create({
-          data: {
-            userId,
-            stockSymbol: symbol,
-            type: 'BUY',
-            quantity,
-            price: stockPrice.price,
-          },
-        });
-
-        return { updatedUser, portfolio };
-      });
-
-      return {
-        success: true,
-        message: 'Stock purchased successfully',
-        balance: result.updatedUser.balance,
-        portfolio: result.portfolio,
-      };
-    } catch (error) {
-      console.error('Error buying stock:', error);
-      return { success: false, message: 'Failed to purchase stock' };
+      const stockPrice = specifiedPrice || (await marketService.getStockPrice(symbol)).price;
+      return await firebaseDb.executeBuy(userId, symbol, quantity, stockPrice, productType, orderType);
+    } catch (error: any) {
+      console.error('Error buying stock in TradingService:', error);
+      return { success: false, message: error.message || 'Failed to purchase stock' };
     }
   }
 
-  async sellStock(userId: string, symbol: string, quantity: number): Promise<TradeResult> {
+  async sellStock(
+    userId: string,
+    symbol: string,
+    quantity: number,
+    productType: string = 'MIS',
+    orderType: string = 'MARKET',
+    specifiedPrice?: number
+  ): Promise<TradeResult> {
     try {
-      // Fetch current price
-      const stockPrice = await marketService.getStockPrice(symbol);
-      const totalValue = stockPrice.price * quantity;
-
-      // Check portfolio
-      const portfolio = await prisma.portfolio.findUnique({
-        where: {
-          userId_stockSymbol: {
-            userId,
-            stockSymbol: symbol,
-          },
-        },
-      });
-
-      if (!portfolio || portfolio.quantity < quantity) {
-        return { success: false, message: 'Insufficient stock quantity' };
-      }
-
-      // Execute transaction
-      const result = await prisma.$transaction(async (tx) => {
-        // Add balance
-        const updatedUser = await tx.user.update({
-          where: { id: userId },
-          data: { balance: { increment: totalValue } },
-        });
-
-        // Update or remove portfolio entry
-        let updatedPortfolio;
-        if (portfolio.quantity === quantity) {
-          await tx.portfolio.delete({
-            where: { id: portfolio.id },
-          });
-          updatedPortfolio = null;
-        } else {
-          updatedPortfolio = await tx.portfolio.update({
-            where: { id: portfolio.id },
-            data: { quantity: portfolio.quantity - quantity },
-          });
-        }
-
-        // Log transaction
-        await tx.transaction.create({
-          data: {
-            userId,
-            stockSymbol: symbol,
-            type: 'SELL',
-            quantity,
-            price: stockPrice.price,
-          },
-        });
-
-        return { updatedUser, portfolio: updatedPortfolio };
-      });
-
-      return {
-        success: true,
-        message: 'Stock sold successfully',
-        balance: result.updatedUser.balance,
-        portfolio: result.portfolio,
-      };
-    } catch (error) {
-      console.error('Error selling stock:', error);
-      return { success: false, message: 'Failed to sell stock' };
+      const stockPrice = specifiedPrice || (await marketService.getStockPrice(symbol)).price;
+      return await firebaseDb.executeSell(userId, symbol, quantity, stockPrice, productType, orderType);
+    } catch (error: any) {
+      console.error('Error selling stock in TradingService:', error);
+      return { success: false, message: error.message || 'Failed to sell stock' };
     }
   }
 
-  async getPortfolio(userId: string) {
-    const portfolios = await prisma.portfolio.findMany({
-      where: { userId },
-    });
+  async getPortfolio(userId: string): Promise<PortfolioItemWithQuote[]> {
+    const portfolios = await firebaseDb.getPortfolio(userId);
 
     const portfolioWithCurrentPrices = await Promise.all(
       portfolios.map(async (item) => {
         try {
           const stockPrice = await marketService.getStockPrice(item.stockSymbol);
-          const currentValue = stockPrice.price * item.quantity;
+          const currentPrice = stockPrice.price;
+          const currentValue = currentPrice * item.quantity;
           const investedValue = item.avgPrice * item.quantity;
           const profitLoss = currentValue - investedValue;
-          const profitLossPercent = (profitLoss / investedValue) * 100;
+          const profitLossPercent = investedValue > 0 ? (profitLoss / investedValue) * 100 : 0;
 
           return {
             ...item,
-            currentPrice: stockPrice.price,
+            currentPrice,
             currentValue,
             investedValue,
             profitLoss,
             profitLossPercent,
+            changePercent: stockPrice.changePercent,
           };
         } catch (error) {
+          const investedValue = item.avgPrice * item.quantity;
           return {
             ...item,
             currentPrice: item.avgPrice,
-            currentValue: item.avgPrice * item.quantity,
-            investedValue: item.avgPrice * item.quantity,
+            currentValue: investedValue,
+            investedValue,
             profitLoss: 0,
             profitLossPercent: 0,
+            changePercent: 0,
           };
         }
       })
@@ -202,12 +92,12 @@ class TradingService {
     return portfolioWithCurrentPrices;
   }
 
-  async getTransactions(userId: string, limit: number = 50) {
-    return prisma.transaction.findMany({
-      where: { userId },
-      orderBy: { createdAt: 'desc' },
-      take: limit,
-    });
+  async getTransactions(userId: string, limit: number = 50): Promise<TransactionDoc[]> {
+    return firebaseDb.getTransactions(userId, limit);
+  }
+
+  async resetDemoFunds(userId: string) {
+    return firebaseDb.resetUserFunds(userId);
   }
 }
 

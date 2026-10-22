@@ -2,6 +2,20 @@
 
 import { useState, useEffect } from 'react';
 import { useSession } from '@/components/AuthContext';
+import { toast } from 'sonner';
+import confetti from 'canvas-confetti';
+import { soundManager } from '@/lib/sound';
+import {
+  X,
+  TrendingUp,
+  TrendingDown,
+  Info,
+  CheckCircle2,
+  AlertTriangle,
+  Calculator,
+  ShieldAlert,
+  Target,
+} from 'lucide-react';
 
 interface TradingModalProps {
   isOpen: boolean;
@@ -10,12 +24,13 @@ interface TradingModalProps {
   stockName: string;
   currentPrice: number;
   availableQuantity?: number;
+  initialSide?: 'BUY' | 'SELL';
+  onOrderSuccess?: () => void;
 }
 
 type OrderSide = 'BUY' | 'SELL';
 type OrderType = 'MARKET' | 'LIMIT' | 'SL' | 'SL-M';
 type ProductType = 'MIS' | 'NRML';
-type QuantityMode = 'FIXED' | 'AUTO';
 
 export default function TradingModal({
   isOpen,
@@ -24,104 +39,121 @@ export default function TradingModal({
   stockName,
   currentPrice,
   availableQuantity = 0,
+  initialSide = 'BUY',
+  onOrderSuccess,
 }: TradingModalProps) {
   const { data: session } = useSession();
-  
-  // Order state
-  const [orderSide, setOrderSide] = useState<OrderSide>('BUY');
+
+  const [orderSide, setOrderSide] = useState<OrderSide>(initialSide);
   const [productType, setProductType] = useState<ProductType>('MIS');
   const [orderType, setOrderType] = useState<OrderType>('MARKET');
-  const [quantityMode, setQuantityMode] = useState<QuantityMode>('FIXED');
-  
-  // Quantity & Price
-  const [quantity, setQuantity] = useState(1);
-  const [amount, setAmount] = useState(currentPrice);
-  const [limitPrice, setLimitPrice] = useState(currentPrice);
-  const [triggerPrice, setTriggerPrice] = useState(currentPrice * 0.98);
-  
-  // Advanced options
+
+  const [quantity, setQuantity] = useState<number>(1);
+  const [limitPrice, setLimitPrice] = useState<number>(currentPrice || 100);
+  const [triggerPrice, setTriggerPrice] = useState<number>(Number(((currentPrice || 100) * 0.98).toFixed(2)));
+
   const [enableTarget, setEnableTarget] = useState(false);
+  const [targetPrice, setTargetPrice] = useState<number>(Number(((currentPrice || 100) * 1.05).toFixed(2)));
+
   const [enableStopLoss, setEnableStopLoss] = useState(false);
-  const [targetPrice, setTargetPrice] = useState(currentPrice * 1.05);
-  const [stopLossPrice, setStopLossPrice] = useState(currentPrice * 0.95);
-  
-  // UI state
-  const [balance, setBalance] = useState(0);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
+  const [stopLossPrice, setStopLossPrice] = useState<number>(Number(((currentPrice || 100) * 0.95).toFixed(2)));
 
-  // Fetch user balance
-  useEffect(() => {
-    if (session) {
-      fetchBalance();
-    }
-  }, [session]);
+  const [balance, setBalance] = useState<number>(100000);
+  const [userHoldings, setUserHoldings] = useState<number>(availableQuantity);
+  const [loading, setLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string>('');
+  const [success, setSuccess] = useState<string>('');
 
-  // Auto calculate quantity when amount changes
   useEffect(() => {
-    if (quantityMode === 'AUTO' && amount > 0) {
-      const price = orderType === 'LIMIT' ? limitPrice : currentPrice;
-      const calculatedQty = Math.floor(amount / price);
-      setQuantity(calculatedQty > 0 ? calculatedQty : 1);
-    }
-  }, [amount, quantityMode, orderType, limitPrice, currentPrice]);
+    setOrderSide(initialSide);
+  }, [initialSide]);
 
-  // Update prices when current price changes
   useEffect(() => {
-    if (orderType === 'MARKET') {
+    if (currentPrice > 0) {
       setLimitPrice(currentPrice);
+      setTriggerPrice(Number((currentPrice * 0.98).toFixed(2)));
+      setTargetPrice(Number((currentPrice * 1.05).toFixed(2)));
+      setStopLossPrice(Number((currentPrice * 0.95).toFixed(2)));
     }
-    setTriggerPrice(currentPrice * 0.98);
-    setTargetPrice(currentPrice * 1.05);
-    setStopLossPrice(currentPrice * 0.95);
   }, [currentPrice]);
 
-  const fetchBalance = async () => {
+  useEffect(() => {
+    if (session && isOpen) {
+      fetchPortfolioData();
+    }
+  }, [session, isOpen, stockSymbol]);
+
+  const fetchPortfolioData = async () => {
     try {
-      const response = await fetch('/api/portfolio');
-      const data = await response.json();
-      setBalance(data.balance || 0);
-    } catch (err) {
-      console.error('Error fetching balance:', err);
+      const res = await fetch('/api/portfolio');
+      if (res.ok) {
+        const data = await res.json();
+        setBalance(data.balance ?? 100000);
+        const item = data.portfolio?.find((p: any) => p.stockSymbol === stockSymbol);
+        setUserHoldings(item ? item.quantity : 0);
+      }
+    } catch {
+      // Fallback
     }
   };
 
-  const calculateTotal = () => {
-    const price = orderType === 'LIMIT' ? limitPrice : currentPrice;
-    return quantity * price;
+  if (!isOpen) return null;
+
+  const executionPrice = orderType === 'LIMIT' ? limitPrice : currentPrice;
+  const totalAmount = quantity * executionPrice;
+  const isBuy = orderSide === 'BUY';
+
+  // Preset quantity handlers
+  const handleAddQty = (add: number) => {
+    setQuantity((prev) => Math.max(1, prev + add));
   };
 
-  const validateOrder = (): string | null => {
-    if (quantity <= 0) return 'Quantity must be greater than 0';
-    
-    if (orderSide === 'BUY') {
-      const total = calculateTotal();
-      if (total > balance) return 'Insufficient balance';
+  const handleMaxQty = () => {
+    if (isBuy) {
+      const maxShares = Math.floor(balance / executionPrice);
+      setQuantity(Math.max(1, maxShares));
     } else {
-      if (quantity > availableQuantity) return `Only ${availableQuantity} shares available`;
+      setQuantity(Math.max(1, userHoldings));
     }
-    
-    if (orderType === 'LIMIT' && limitPrice <= 0) return 'Invalid limit price';
-    if ((orderType === 'SL' || orderType === 'SL-M') && triggerPrice <= 0) return 'Invalid trigger price';
-    
-    return null;
   };
 
-  const handleSubmit = async () => {
+  // Projected profit and loss for bracket
+  const projectedProfit = enableTarget && targetPrice > executionPrice
+    ? (targetPrice - executionPrice) * quantity
+    : 0;
+
+  const projectedLoss = enableStopLoss && stopLossPrice < executionPrice
+    ? (executionPrice - stopLossPrice) * quantity
+    : 0;
+
+  const riskRewardRatio = projectedLoss > 0 && projectedProfit > 0
+    ? (projectedProfit / projectedLoss).toFixed(2)
+    : null;
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
     setError('');
     setSuccess('');
-    
-    const validationError = validateOrder();
-    if (validationError) {
-      setError(validationError);
+
+    if (quantity <= 0) {
+      setError('Please specify a valid quantity greater than 0.');
+      return;
+    }
+
+    if (isBuy && totalAmount > balance) {
+      setError(`Insufficient balance. Required ₹${totalAmount.toLocaleString('en-IN')}, available ₹${balance.toLocaleString('en-IN')}`);
+      return;
+    }
+
+    if (!isBuy && quantity > userHoldings) {
+      setError(`Insufficient holdings. You only hold ${userHoldings} shares of ${stockSymbol}.`);
       return;
     }
 
     setLoading(true);
 
     try {
-      const orderData = {
+      const orderPayload = {
         symbol: stockSymbol,
         quantity,
         orderSide,
@@ -136,360 +168,380 @@ export default function TradingModal({
       const response = await fetch('/api/trade/order', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(orderData),
+        body: JSON.stringify(orderPayload),
       });
 
       const data = await response.json();
 
-      if (response.ok) {
+      if (response.ok && data.success) {
         setSuccess(data.message || 'Order placed successfully!');
+        soundManager.playOrderSuccess();
+        toast.success(data.message || 'Order successfully executed!', {
+          description: `${orderSide} ${quantity} shares of ${stockSymbol} at ₹${(data.order?.executedPrice || executionPrice).toFixed(2)}`,
+        });
+
+        // Trigger victory confetti burst
+        confetti({
+          particleCount: 50,
+          spread: 60,
+          origin: { y: 0.7 },
+        });
+
+        if (data.balance !== undefined) setBalance(data.balance);
+        if (onOrderSuccess) onOrderSuccess();
         setTimeout(() => {
           onClose();
-          window.location.reload();
-        }, 1500);
+        }, 1200);
       } else {
-        setError(data.error || 'Failed to place order');
+        const errMsg = data.error || 'Failed to place order.';
+        setError(errMsg);
+        soundManager.playOrderCancel();
+        toast.error('Order Rejected', { description: errMsg });
       }
-    } catch (err) {
-      setError('An error occurred while placing order');
+    } catch {
+      const errMsg = 'Network communication failed. Please retry.';
+      setError(errMsg);
+      soundManager.playOrderCancel();
+      toast.error('Order Error', { description: errMsg });
     } finally {
       setLoading(false);
     }
   };
 
-  if (!isOpen) return null;
-
-  const total = calculateTotal();
-  const remainingBalance = balance - (orderSide === 'BUY' ? total : 0);
-
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-        {/* Header */}
-        <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex justify-between items-center">
-          <div>
-            <h2 className="text-xl font-bold text-gray-900">{stockSymbol}</h2>
-            <p className="text-sm text-gray-600">{stockName}</p>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-200">
+      <div
+        className={`w-full max-w-lg bg-[#0e1524] border rounded-2xl shadow-2xl overflow-hidden transition-all duration-300 ${
+          isBuy ? 'border-blue-500/40 shadow-blue-500/10' : 'border-rose-500/40 shadow-rose-500/10'
+        }`}
+      >
+        {/* Terminal Header */}
+        <div
+          className={`px-6 py-4 flex items-center justify-between border-b ${
+            isBuy
+              ? 'bg-gradient-to-r from-blue-950/80 to-slate-900 border-blue-500/30'
+              : 'bg-gradient-to-r from-rose-950/80 to-slate-900 border-rose-500/30'
+          }`}
+        >
+          <div className="flex items-center gap-3">
+            <div
+              className={`p-2 rounded-xl ${
+                isBuy ? 'bg-blue-600/20 text-blue-400' : 'bg-rose-600/20 text-rose-400'
+              }`}
+            >
+              {isBuy ? <TrendingUp className="w-5 h-5" /> : <TrendingDown className="w-5 h-5" />}
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-base font-bold text-white tracking-tight">{stockSymbol}</h3>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-slate-800 text-slate-300 border border-slate-700">
+                  {stockSymbol.endsWith('.NS') ? 'NSE' : 'NASDAQ'}
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 truncate max-w-[240px]">{stockName}</p>
+            </div>
           </div>
+
+          <div className="flex items-center gap-3">
+            <div className="text-right">
+              <div className="text-xs font-mono font-bold text-white">
+                ₹{currentPrice.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+              </div>
+              <div className="text-[10px] text-slate-400">Live LTP</div>
+            </div>
+
+            <button
+              onClick={onClose}
+              className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800/80 rounded-lg transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+        </div>
+
+        {/* Order Side Selector Tabs (BUY / SELL) */}
+        <div className="grid grid-cols-2 p-1.5 bg-slate-950/80 border-b border-slate-800">
           <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 transition-colors"
+            type="button"
+            onClick={() => setOrderSide('BUY')}
+            className={`py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-2 ${
+              isBuy
+                ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30'
+                : 'text-slate-400 hover:text-white'
+            }`}
           >
-            <span className="material-symbols-outlined">close</span>
+            <span>BUY / LONG</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setOrderSide('SELL')}
+            className={`py-2 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-2 ${
+              !isBuy
+                ? 'bg-rose-600 text-white shadow-md shadow-rose-600/30'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <span>SELL / SHORT</span>
           </button>
         </div>
 
-        <div className="p-6 space-y-6">
-          {/* Current Price */}
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-            <div className="text-sm text-gray-600 mb-1">Current Market Price</div>
-            <div className="text-2xl font-bold text-gray-900">₹{currentPrice.toFixed(2)}</div>
-          </div>
-
-          {/* Buy/Sell Toggle */}
-          <div className="grid grid-cols-2 gap-3">
-            <button
-              onClick={() => setOrderSide('BUY')}
-              className={`py-3 rounded-lg font-bold text-sm uppercase tracking-wider transition-all ${
-                orderSide === 'BUY'
-                  ? 'bg-green-600 text-white shadow-lg'
-                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-              }`}
-            >
-              Buy
-            </button>
-            <button
-              onClick={() => setOrderSide('SELL')}
-              className={`py-3 rounded-lg font-bold text-sm uppercase tracking-wider transition-all ${
-                orderSide === 'SELL'
-                  ? 'bg-red-600 text-white shadow-lg'
-                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-              }`}
-            >
-              Sell
-            </button>
-          </div>
-
-          {/* Product Type */}
+        {/* Modal Form Content */}
+        <form onSubmit={handleSubmit} className="p-6 space-y-5 max-h-[75vh] overflow-y-auto">
+          {/* Product Type (MIS vs NRML) */}
           <div>
-            <label className="block text-xs font-bold text-gray-700 mb-2 uppercase tracking-wider">
-              Product Type
-            </label>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-xs font-semibold text-slate-300">Product Mode</label>
+              <span className="text-[11px] text-slate-400 flex items-center gap-1">
+                <Info className="w-3 h-3 text-blue-400" />
+                {productType === 'MIS' ? 'Intraday (Auto square-off)' : 'Delivery / Overnight'}
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
               <button
+                type="button"
                 onClick={() => setProductType('MIS')}
-                className={`py-2 px-4 rounded-lg text-sm font-medium transition-all ${
+                className={`py-2 px-3 rounded-xl text-xs font-bold border transition-all ${
                   productType === 'MIS'
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    ? 'bg-blue-950/50 border-blue-500 text-blue-300'
+                    : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'
                 }`}
               >
-                Intraday (MIS)
+                MIS (Intraday 5x)
               </button>
               <button
+                type="button"
                 onClick={() => setProductType('NRML')}
-                className={`py-2 px-4 rounded-lg text-sm font-medium transition-all ${
+                className={`py-2 px-3 rounded-xl text-xs font-bold border transition-all ${
                   productType === 'NRML'
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    ? 'bg-blue-950/50 border-blue-500 text-blue-300'
+                    : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'
                 }`}
               >
-                Overnight (NRML)
+                NRML (CNC Longterm)
               </button>
             </div>
           </div>
 
-          {/* Order Type */}
+          {/* Order Type (MARKET, LIMIT, SL) */}
           <div>
-            <label className="block text-xs font-bold text-gray-700 mb-2 uppercase tracking-wider">
-              Order Type
-            </label>
-            <div className="grid grid-cols-2 gap-3">
-              <button
-                onClick={() => setOrderType('MARKET')}
-                className={`py-2 px-4 rounded-lg text-sm font-medium transition-all ${
-                  orderType === 'MARKET'
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-              >
-                Market
-              </button>
-              <button
-                onClick={() => setOrderType('LIMIT')}
-                className={`py-2 px-4 rounded-lg text-sm font-medium transition-all ${
-                  orderType === 'LIMIT'
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-              >
-                Limit
-              </button>
-              <button
-                onClick={() => setOrderType('SL')}
-                className={`py-2 px-4 rounded-lg text-sm font-medium transition-all ${
-                  orderType === 'SL'
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-              >
-                Stop Loss
-              </button>
-              <button
-                onClick={() => setOrderType('SL-M')}
-                className={`py-2 px-4 rounded-lg text-sm font-medium transition-all ${
-                  orderType === 'SL-M'
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-              >
-                SL-Market
-              </button>
+            <label className="text-xs font-semibold text-slate-300 block mb-2">Order Execution Type</label>
+            <div className="grid grid-cols-4 gap-1.5">
+              {(['MARKET', 'LIMIT', 'SL', 'SL-M'] as OrderType[]).map((type) => (
+                <button
+                  key={type}
+                  type="button"
+                  onClick={() => setOrderType(type)}
+                  className={`py-2 px-1 text-center rounded-xl text-xs font-semibold border transition-all ${
+                    orderType === type
+                      ? 'bg-slate-800 border-blue-400 text-white'
+                      : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:border-slate-700'
+                  }`}
+                >
+                  {type}
+                </button>
+              ))}
             </div>
           </div>
 
-          {/* Limit Price (for LIMIT orders) */}
-          {orderType === 'LIMIT' && (
-            <div>
-              <label className="block text-xs font-bold text-gray-700 mb-2 uppercase tracking-wider">
-                Limit Price
-              </label>
+          {/* Quantity & Preset Chips */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-xs font-semibold text-slate-300">Quantity (Shares)</label>
+              <div className="text-[11px] text-slate-400">
+                {isBuy ? (
+                  <span>Avail Cash: <strong className="text-emerald-400 font-mono">₹{balance.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</strong></span>
+                ) : (
+                  <span>Holdings: <strong className="text-blue-400 font-mono">{userHoldings} shares</strong></span>
+                )}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
               <input
                 type="number"
-                value={limitPrice}
-                onChange={(e) => setLimitPrice(parseFloat(e.target.value) || 0)}
+                min="1"
+                step="1"
+                value={quantity}
+                onChange={(e) => setQuantity(Math.max(1, parseInt(e.target.value) || 1))}
+                className="w-full bg-slate-900 border border-slate-800 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-white text-base font-mono rounded-xl px-4 py-2.5 outline-none transition-all"
+                required
+              />
+              <button
+                type="button"
+                onClick={handleMaxQty}
+                className="px-3 py-2.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-bold rounded-xl transition-colors whitespace-nowrap"
+              >
+                MAX
+              </button>
+            </div>
+
+            {/* Quick Multiplier Stepper Chips */}
+            <div className="flex items-center gap-1.5 mt-2">
+              {[1, 5, 25, 50, 100].map((step) => (
+                <button
+                  key={step}
+                  type="button"
+                  onClick={() => handleAddQty(step)}
+                  className="flex-1 py-1 text-[11px] font-mono font-semibold bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 text-slate-400 hover:text-slate-200 rounded-lg transition-colors"
+                >
+                  +{step}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Limit Price Input (if LIMIT or SL) */}
+          {(orderType === 'LIMIT' || orderType === 'SL') && (
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-xs font-semibold text-slate-300">Limit Price (₹)</label>
+                <span className="text-[11px] text-slate-400 font-mono">
+                  Diff: {(((limitPrice - currentPrice) / currentPrice) * 100).toFixed(2)}%
+                </span>
+              </div>
+              <input
+                type="number"
                 step="0.05"
-                className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:border-transparent"
+                value={limitPrice}
+                onChange={(e) => setLimitPrice(parseFloat(e.target.value) || currentPrice)}
+                className="w-full bg-slate-900 border border-slate-800 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-white text-base font-mono rounded-xl px-4 py-2.5 outline-none transition-all"
+                required
               />
             </div>
           )}
 
-          {/* Trigger Price (for SL orders) */}
+          {/* Trigger Price Input (if SL or SL-M) */}
           {(orderType === 'SL' || orderType === 'SL-M') && (
             <div>
-              <label className="block text-xs font-bold text-gray-700 mb-2 uppercase tracking-wider">
-                Trigger Price
-              </label>
+              <label className="text-xs font-semibold text-slate-300 block mb-2">Trigger Price (₹)</label>
               <input
                 type="number"
+                step="0.05"
                 value={triggerPrice}
                 onChange={(e) => setTriggerPrice(parseFloat(e.target.value) || 0)}
-                step="0.05"
-                className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:border-transparent"
+                className="w-full bg-slate-900 border border-slate-800 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-white text-base font-mono rounded-xl px-4 py-2.5 outline-none transition-all"
+                required
               />
             </div>
           )}
 
-          {/* Quantity Mode Toggle */}
-          <div>
-            <label className="block text-xs font-bold text-gray-700 mb-2 uppercase tracking-wider">
-              Quantity
-            </label>
-            <div className="grid grid-cols-2 gap-3 mb-3">
-              <button
-                onClick={() => setQuantityMode('FIXED')}
-                className={`py-2 px-4 rounded-lg text-sm font-medium transition-all ${
-                  quantityMode === 'FIXED'
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-              >
-                Fixed
-              </button>
-              <button
-                onClick={() => setQuantityMode('AUTO')}
-                className={`py-2 px-4 rounded-lg text-sm font-medium transition-all ${
-                  quantityMode === 'AUTO'
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-              >
-                Auto Calculate
-              </button>
+          {/* Advanced Risk Controls (Bracket Target & Stop Loss) */}
+          <div className="p-3.5 bg-slate-900/40 rounded-xl border border-slate-800 space-y-3">
+            <div className="flex items-center justify-between text-xs font-semibold text-slate-300">
+              <span className="flex items-center gap-1.5">
+                <Target className="w-3.5 h-3.5 text-blue-400" />
+                Risk / Reward Controls
+              </span>
+              {riskRewardRatio && (
+                <span className="text-[11px] text-emerald-400 font-mono font-bold">
+                  R:R = 1 : {riskRewardRatio}
+                </span>
+              )}
             </div>
 
-            {quantityMode === 'FIXED' ? (
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={() => setQuantity(Math.max(1, quantity - 1))}
-                  className="w-12 h-12 bg-gray-100 hover:bg-gray-200 rounded-lg flex items-center justify-center font-bold text-xl"
-                >
-                  −
-                </button>
-                <input
-                  type="number"
-                  value={quantity}
-                  onChange={(e) => setQuantity(Math.max(1, parseInt(e.target.value) || 1))}
-                  className="flex-1 px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg text-center font-bold text-lg focus:ring-2 focus:ring-blue-600 focus:border-transparent"
-                />
-                <button
-                  onClick={() => setQuantity(quantity + 1)}
-                  className="w-12 h-12 bg-gray-100 hover:bg-gray-200 rounded-lg flex items-center justify-center font-bold text-xl"
-                >
-                  +
-                </button>
-              </div>
-            ) : (
-              <div>
-                <label className="block text-xs text-gray-600 mb-2">Enter Amount (₹)</label>
-                <input
-                  type="number"
-                  value={amount}
-                  onChange={(e) => setAmount(parseFloat(e.target.value) || 0)}
-                  step="100"
-                  className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:border-transparent"
-                />
-                <div className="mt-2 text-sm text-gray-600">
-                  Calculated Quantity: <span className="font-bold">{quantity}</span>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Advanced Options */}
-          <div className="border-t border-gray-200 pt-4">
-            <div className="space-y-3">
-              <label className="flex items-center gap-3 cursor-pointer">
+            {/* Target checkbox */}
+            <div className="flex items-center justify-between">
+              <label className="flex items-center gap-2 text-xs text-slate-400 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={enableTarget}
                   onChange={(e) => setEnableTarget(e.target.checked)}
-                  className="w-5 h-5 text-blue-600 rounded focus:ring-2 focus:ring-blue-600"
+                  className="rounded border-slate-700 bg-slate-800 text-blue-600 focus:ring-0"
                 />
-                <span className="text-sm font-medium text-gray-700">Set Target Price</span>
+                <span>Set Target Profit</span>
               </label>
               {enableTarget && (
-                <input
-                  type="number"
-                  value={targetPrice}
-                  onChange={(e) => setTargetPrice(parseFloat(e.target.value) || 0)}
-                  step="0.05"
-                  placeholder="Target Price"
-                  className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-green-600 focus:border-transparent"
-                />
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-emerald-400 font-mono">
+                    +₹{projectedProfit.toFixed(0)}
+                  </span>
+                  <input
+                    type="number"
+                    step="0.05"
+                    value={targetPrice}
+                    onChange={(e) => setTargetPrice(parseFloat(e.target.value) || 0)}
+                    className="w-24 bg-slate-900 border border-slate-800 text-white text-xs font-mono rounded-lg px-2 py-1 outline-none"
+                  />
+                </div>
               )}
+            </div>
 
-              <label className="flex items-center gap-3 cursor-pointer">
+            {/* Stop Loss checkbox */}
+            <div className="flex items-center justify-between">
+              <label className="flex items-center gap-2 text-xs text-slate-400 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={enableStopLoss}
                   onChange={(e) => setEnableStopLoss(e.target.checked)}
-                  className="w-5 h-5 text-blue-600 rounded focus:ring-2 focus:ring-blue-600"
+                  className="rounded border-slate-700 bg-slate-800 text-rose-600 focus:ring-0"
                 />
-                <span className="text-sm font-medium text-gray-700">Set Stop Loss</span>
+                <span>Set Stop Loss</span>
               </label>
               {enableStopLoss && (
-                <input
-                  type="number"
-                  value={stopLossPrice}
-                  onChange={(e) => setStopLossPrice(parseFloat(e.target.value) || 0)}
-                  step="0.05"
-                  placeholder="Stop Loss Price"
-                  className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-red-600 focus:border-transparent"
-                />
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-rose-400 font-mono">
+                    -₹{projectedLoss.toFixed(0)}
+                  </span>
+                  <input
+                    type="number"
+                    step="0.05"
+                    value={stopLossPrice}
+                    onChange={(e) => setStopLossPrice(parseFloat(e.target.value) || 0)}
+                    className="w-24 bg-slate-900 border border-slate-800 text-white text-xs font-mono rounded-lg px-2 py-1 outline-none"
+                  />
+                </div>
               )}
             </div>
           </div>
 
-          {/* Order Summary */}
-          <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 space-y-2">
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-600">Quantity</span>
-              <span className="font-bold text-gray-900">{quantity}</span>
+          {/* Feedback Alerts */}
+          {error && (
+            <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 shrink-0 text-rose-400" />
+              <span>{error}</span>
             </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-600">Price</span>
-              <span className="font-bold text-gray-900">
-                ₹{(orderType === 'LIMIT' ? limitPrice : currentPrice).toFixed(2)}
+          )}
+
+          {success && (
+            <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+              <span>{success}</span>
+            </div>
+          )}
+
+          {/* Bottom Execution Bar with Margin Breakdown */}
+          <div className="pt-2 border-t border-slate-800 space-y-3">
+            <div className="flex items-center justify-between text-xs font-mono">
+              <span className="text-slate-400">Total Margin Required:</span>
+              <span className="font-bold text-white text-sm">
+                ₹{totalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
               </span>
             </div>
-            <div className="border-t border-gray-300 pt-2 flex justify-between">
-              <span className="font-bold text-gray-900">Total</span>
-              <span className="font-bold text-gray-900 text-lg">₹{total.toFixed(2)}</span>
-            </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-600">Available Balance</span>
-              <span className="font-medium text-gray-900">₹{balance.toFixed(2)}</span>
-            </div>
-            {orderSide === 'BUY' && (
-              <div className="flex justify-between text-sm">
-                <span className="text-gray-600">Remaining Balance</span>
-                <span className={`font-medium ${remainingBalance < 0 ? 'text-red-600' : 'text-green-600'}`}>
-                  ₹{remainingBalance.toFixed(2)}
-                </span>
-              </div>
-            )}
+
+            <button
+              type="submit"
+              disabled={loading}
+              className={`w-full py-3.5 px-4 rounded-xl text-white font-bold text-sm tracking-wide shadow-lg active:scale-[0.99] transition-all flex items-center justify-center gap-2 ${
+                isBuy
+                  ? 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-blue-600/30'
+                  : 'bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 shadow-rose-600/30'
+              } ${loading ? 'opacity-70 cursor-not-allowed' : ''}`}
+            >
+              {loading ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  <span>Routing Order to Exchange...</span>
+                </>
+              ) : (
+                <>
+                  <span>
+                    {isBuy ? 'EXECUTE BUY ORDER' : 'EXECUTE SELL ORDER'} ({stockSymbol})
+                  </span>
+                </>
+              )}
+            </button>
           </div>
-
-          {/* Error/Success Messages */}
-          {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
-              {error}
-            </div>
-          )}
-          {success && (
-            <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg text-sm">
-              {success}
-            </div>
-          )}
-
-          {/* Submit Button */}
-          <button
-            onClick={handleSubmit}
-            disabled={loading || !!validateOrder()}
-            className={`w-full py-4 rounded-lg font-bold text-white text-sm uppercase tracking-wider transition-all ${
-              orderSide === 'BUY'
-                ? 'bg-green-600 hover:bg-green-700 disabled:bg-gray-300'
-                : 'bg-red-600 hover:bg-red-700 disabled:bg-gray-300'
-            } disabled:cursor-not-allowed`}
-          >
-            {loading ? (
-              'Processing...'
-            ) : (
-              `${orderType} ${orderSide} ${quantity} ${quantity === 1 ? 'Share' : 'Shares'}`
-            )}
-          </button>
-        </div>
+        </form>
       </div>
     </div>
   );

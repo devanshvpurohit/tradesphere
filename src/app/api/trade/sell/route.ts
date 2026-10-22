@@ -1,37 +1,40 @@
-import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
-
+import { NextRequest, NextResponse } from 'next/server';
+import { getAuthenticatedUser } from '@/lib/firebase/auth-helper';
 import { tradingService } from '@/services/tradingService';
 import { z } from 'zod';
+
+export const dynamic = 'force-dynamic';
 
 const sellSchema = z.object({
   symbol: z.string(),
   quantity: z.number().positive().int(),
+  productType: z.string().optional().default('MIS'),
+  orderType: z.string().optional().default('MARKET'),
+  price: z.number().optional(),
 });
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
-    const supabase = createClient();
-    const { data: { user: authUser } } = await supabase.auth.getUser();
-    const session = authUser ? { user: authUser } : null;
+    const user = await getAuthenticatedUser(request);
 
-    if (!session?.user?.id) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      );
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     const body = await request.json();
-    const { symbol, quantity } = sellSchema.parse(body);
+    const { symbol, quantity, productType, orderType, price } = sellSchema.parse(body);
 
-    const result = await tradingService.sellStock(session.user.id, symbol, quantity);
+    const result = await tradingService.sellStock(
+      user.id,
+      symbol,
+      quantity,
+      productType,
+      orderType,
+      price
+    );
 
     if (!result.success) {
-      return NextResponse.json(
-        { error: result.message },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: result.message }, { status: 400 });
     }
 
     return NextResponse.json(result);
@@ -44,9 +47,6 @@ export async function POST(request: Request) {
     }
 
     console.error('Error selling stock:', error);
-    return NextResponse.json(
-      { error: 'Failed to sell stock' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Failed to sell stock' }, { status: 500 });
   }
 }

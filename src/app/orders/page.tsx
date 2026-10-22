@@ -3,28 +3,41 @@
 import { useEffect, useState } from 'react';
 import Sidebar from '@/components/Sidebar';
 import TopNav from '@/components/TopNav';
+import Link from 'next/link';
+import {
+  Layers,
+  Clock,
+  CheckCircle2,
+  XCircle,
+  AlertCircle,
+  X,
+  Trash2,
+  Zap,
+} from 'lucide-react';
 
 interface Order {
   id: string;
   stockSymbol: string;
-  type: string;
+  type: 'BUY' | 'SELL';
   orderType: string;
   productType: string;
   quantity: number;
-  price: number | null;
-  triggerPrice: number | null;
-  targetPrice: number | null;
-  stopLoss: number | null;
-  status: string;
-  executedPrice: number | null;
-  executedAt: string | null;
+  price?: number | null;
+  triggerPrice?: number | null;
+  targetPrice?: number | null;
+  stopLoss?: number | null;
+  status: 'PENDING' | 'EXECUTED' | 'CANCELLED' | 'REJECTED';
+  executedPrice?: number | null;
+  executedAt?: string | null;
   createdAt: string;
 }
 
-export default function Orders() {
+export default function OrdersPage() {
   const [orders, setOrders] = useState<Order[]>([]);
-  const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'ALL' | 'PENDING' | 'EXECUTED' | 'CANCELLED'>('ALL');
+  const [loading, setLoading] = useState(true);
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   useEffect(() => {
     fetchOrders();
@@ -32,199 +45,235 @@ export default function Orders() {
 
   const fetchOrders = async () => {
     try {
-      const response = await fetch('/api/trade/order');
-      const data = await response.json();
-      setOrders(data.orders || []);
-    } catch (error) {
-      console.error('Error fetching orders:', error);
+      setLoading(true);
+      const res = await fetch('/api/trade/order');
+      if (res.ok) {
+        const data = await res.json();
+        setOrders(data.orders || []);
+      }
+    } catch (err) {
+      console.error('Error fetching orders:', err);
     } finally {
       setLoading(false);
     }
   };
 
-  const filteredOrders = orders.filter((order) => {
-    if (filter === 'ALL') return true;
-    return order.status === filter;
-  });
-
-  const getStatusBadge = (status: string) => {
-    const styles = {
-      PENDING: 'bg-yellow-50 text-yellow-700 border-yellow-200',
-      EXECUTED: 'bg-green-50 text-green-700 border-green-200',
-      CANCELLED: 'bg-gray-50 text-gray-700 border-gray-200',
-      REJECTED: 'bg-red-50 text-red-700 border-red-200',
-    };
-
-    return (
-      <span
-        className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold uppercase border ${
-          styles[status as keyof typeof styles] || styles.PENDING
-        }`}
-      >
-        {status}
-      </span>
-    );
+  const handleCancelOrder = async (orderId: string) => {
+    if (!confirm('Are you sure you want to cancel this pending order?')) return;
+    setCancellingId(orderId);
+    try {
+      const res = await fetch(`/api/trade/order?orderId=${orderId}`, {
+        method: 'DELETE',
+      });
+      if (res.ok) {
+        setOrders((prev) =>
+          prev.map((o) => (o.id === orderId ? { ...o, status: 'CANCELLED' } : o))
+        );
+      }
+    } catch (err) {
+      console.error('Cancel order error:', err);
+    } finally {
+      setCancellingId(null);
+    }
   };
 
-  if (loading) {
-    return (
-      <>
-        <Sidebar />
-        <TopNav />
-        <div className="ml-64 pt-20 min-h-screen bg-gray-50 flex items-center justify-center">
-          <div className="text-xl text-gray-900">Loading...</div>
-        </div>
-      </>
-    );
-  }
+  const filteredOrders = orders.filter((o) => {
+    if (filter === 'ALL') return true;
+    return o.status === filter;
+  });
+
+  const getStatusBadge = (status: Order['status']) => {
+    switch (status) {
+      case 'EXECUTED':
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+            <CheckCircle2 className="w-3 h-3" />
+            FILLED
+          </span>
+        );
+      case 'PENDING':
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold font-mono bg-amber-500/10 text-amber-400 border border-amber-500/20 animate-pulse">
+            <Clock className="w-3 h-3" />
+            OPEN
+          </span>
+        );
+      case 'CANCELLED':
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold font-mono bg-slate-800 text-slate-400 border border-slate-700">
+            <XCircle className="w-3 h-3" />
+            CANCELLED
+          </span>
+        );
+      case 'REJECTED':
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold font-mono bg-rose-500/10 text-rose-400 border border-rose-500/20">
+            <AlertCircle className="w-3 h-3" />
+            REJECTED
+          </span>
+        );
+    }
+  };
 
   return (
-    <>
-      <Sidebar />
-      <TopNav />
-      <div className="ml-64 pt-20 min-h-screen bg-gray-50">
-        <div className="max-w-7xl mx-auto px-8 py-8">
-          <div className="mb-8">
-            <h1 className="text-3xl font-bold text-gray-900 mb-2">Orders</h1>
-            <p className="text-gray-600">View and manage your trading orders</p>
-          </div>
+    <div className="min-h-screen bg-[#0a0e17] text-slate-100">
+      <Sidebar
+        isOpen={mobileSidebarOpen}
+        onClose={() => setMobileSidebarOpen(false)}
+      />
+      <TopNav onToggleMobileSidebar={() => setMobileSidebarOpen(!mobileSidebarOpen)} />
 
-          {/* Filter Tabs */}
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 mb-6">
-            <div className="flex gap-2 p-2">
-              {(['ALL', 'PENDING', 'EXECUTED', 'CANCELLED'] as const).map((tab) => (
-                <button
-                  key={tab}
-                  onClick={() => setFilter(tab)}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                    filter === tab
-                      ? 'bg-blue-600 text-white'
-                      : 'text-gray-700 hover:bg-gray-100'
-                  }`}
-                >
-                  {tab}
-                  <span className="ml-2 text-xs opacity-75">
-                    ({orders.filter((o) => tab === 'ALL' || o.status === tab).length})
-                  </span>
-                </button>
-              ))}
+      <main className="md:ml-64 pt-24 pb-16 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
+        {/* Header */}
+        <div className="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-xs font-mono font-semibold px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                ORDER BOOK
+              </span>
+              <span className="text-slate-500">•</span>
+              <span className="text-xs text-slate-400">Execution Engine</span>
             </div>
+            <h1 className="text-3xl font-black tracking-tight text-white">Orders & Execution Book</h1>
+            <p className="text-sm text-slate-400 mt-1">
+              Monitor active market orders, pending trigger limit queues, and execution timestamps.
+            </p>
           </div>
 
-          {filteredOrders.length === 0 ? (
-            <div className="bg-white rounded-lg shadow-sm p-12 text-center border border-gray-200">
-              <span className="material-symbols-outlined text-6xl text-gray-300 mb-4">receipt_long</span>
-              <p className="text-gray-600 text-lg">No {filter.toLowerCase()} orders found.</p>
+          <Link
+            href="/stocks"
+            className="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold transition-all shadow-lg shadow-blue-600/20 flex items-center gap-2 self-start md:self-auto"
+          >
+            <Zap className="w-4 h-4" />
+            <span>Place New Order</span>
+          </Link>
+        </div>
+
+        {/* Filter Tabs */}
+        <div className="flex items-center gap-2 mb-6 border-b border-slate-800 pb-3 overflow-x-auto">
+          {(['ALL', 'PENDING', 'EXECUTED', 'CANCELLED'] as const).map((tab) => {
+            const count = tab === 'ALL' ? orders.length : orders.filter((o) => o.status === tab).length;
+            return (
+              <button
+                key={tab}
+                onClick={() => setFilter(tab)}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 whitespace-nowrap ${
+                  filter === tab
+                    ? 'bg-blue-600 text-white shadow-md shadow-blue-600/20'
+                    : 'bg-slate-900/60 text-slate-400 hover:text-white border border-slate-800'
+                }`}
+              >
+                <span>{tab}</span>
+                <span className="px-1.5 py-0.2 rounded-md bg-black/30 text-[10px] font-mono">
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Orders Table */}
+        <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-6 shadow-xl">
+          {loading ? (
+            <div className="py-20 text-center text-slate-400 text-xs">
+              <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-2" />
+              Loading order history...
+            </div>
+          ) : filteredOrders.length === 0 ? (
+            <div className="py-16 text-center border border-dashed border-slate-800 rounded-xl">
+              <Layers className="w-10 h-10 text-slate-400 mx-auto mb-3" />
+              <h3 className="text-base font-bold text-white mb-1">No Orders Found</h3>
+              <p className="text-xs text-slate-400 mb-5">
+                No {filter !== 'ALL' ? filter.toLowerCase() : ''} orders recorded in this session.
+              </p>
+              <Link
+                href="/stocks"
+                className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-lg transition-all"
+              >
+                <Zap className="w-4 h-4" />
+                <span>Go to Market Explorer</span>
+              </Link>
             </div>
           ) : (
-            <div className="bg-white rounded-lg shadow-sm overflow-hidden border border-gray-200">
-              <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="px-6 py-3 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">
-                        Time
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">
-                        Symbol
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">
-                        Type
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">
-                        Order Type
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">
-                        Product
-                      </th>
-                      <th className="px-6 py-3 text-right text-xs font-bold text-gray-700 uppercase tracking-wider">
-                        Qty
-                      </th>
-                      <th className="px-6 py-3 text-right text-xs font-bold text-gray-700 uppercase tracking-wider">
-                        Price
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-bold text-gray-700 uppercase tracking-wider">
-                        Status
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
-                    {filteredOrders.map((order) => (
-                      <tr key={order.id} className="hover:bg-gray-50 transition-colors">
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                          {new Date(order.createdAt).toLocaleString('en-IN', {
-                            dateStyle: 'short',
-                            timeStyle: 'short',
-                          })}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="flex items-center gap-2">
-                            <span className="material-symbols-outlined text-blue-600">show_chart</span>
-                            <span className="text-sm font-bold text-gray-900">{order.stockSymbol}</span>
-                          </div>
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="border-b border-slate-800 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                    <th className="pb-3 pl-2">Time</th>
+                    <th className="pb-3">Side</th>
+                    <th className="pb-3">Instrument</th>
+                    <th className="pb-3">Type</th>
+                    <th className="pb-3 text-right">Quantity</th>
+                    <th className="pb-3 text-right">Order Price</th>
+                    <th className="pb-3 text-right">Filled Price</th>
+                    <th className="pb-3 text-center">Status</th>
+                    <th className="pb-3 text-right pr-2">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60 font-mono">
+                  {filteredOrders.map((ord) => {
+                    const isBuy = ord.type === 'BUY';
+                    const timeFormatted = new Date(ord.createdAt).toLocaleTimeString('en-IN', {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                      second: '2-digit',
+                    });
+
+                    return (
+                      <tr key={ord.id} className="hover:bg-slate-800/30 transition-colors">
+                        <td className="py-3.5 pl-2 text-slate-400 text-[11px]">{timeFormatted}</td>
+                        <td className="py-3.5">
                           <span
-                            className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold uppercase ${
-                              order.type === 'BUY'
-                                ? 'bg-green-50 text-green-700 border border-green-200'
-                                : 'bg-red-50 text-red-700 border border-red-200'
+                            className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                              isBuy ? 'bg-blue-500/20 text-blue-400' : 'bg-rose-500/20 text-rose-400'
                             }`}
                           >
-                            {order.type}
+                            {ord.type}
                           </span>
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                          {order.orderType}
+                        <td className="py-3.5 font-bold text-white">
+                          <Link
+                            href={`/stocks/${ord.stockSymbol}`}
+                            className="hover:text-blue-400 transition-colors"
+                          >
+                            {ord.stockSymbol}
+                          </Link>
+                          <span className="block text-[10px] text-slate-400 font-normal">
+                            {ord.productType}
+                          </span>
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
-                          {order.productType}
+                        <td className="py-3.5 text-slate-300 font-semibold">{ord.orderType}</td>
+                        <td className="py-3.5 text-right font-bold text-white">{ord.quantity}</td>
+                        <td className="py-3.5 text-right text-slate-400">
+                          {ord.price ? `₹${ord.price.toFixed(2)}` : 'Market'}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-right font-medium text-gray-900">
-                          {order.quantity}
+                        <td className="py-3.5 text-right font-bold text-emerald-400">
+                          {ord.executedPrice ? `₹${ord.executedPrice.toFixed(2)}` : '---'}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-900">
-                          {order.status === 'EXECUTED' && order.executedPrice ? (
-                            <div>
-                              <div className="font-bold">₹{order.executedPrice.toFixed(2)}</div>
-                              {order.price && order.price !== order.executedPrice && (
-                                <div className="text-xs text-gray-500">
-                                  Limit: ₹{order.price.toFixed(2)}
-                                </div>
-                              )}
-                            </div>
-                          ) : order.price ? (
-                            <div>
-                              <div className="font-medium">₹{order.price.toFixed(2)}</div>
-                              {order.triggerPrice && (
-                                <div className="text-xs text-gray-500">
-                                  Trigger: ₹{order.triggerPrice.toFixed(2)}
-                                </div>
-                              )}
-                            </div>
+                        <td className="py-3.5 text-center">{getStatusBadge(ord.status)}</td>
+                        <td className="py-3.5 text-right pr-2">
+                          {ord.status === 'PENDING' ? (
+                            <button
+                              onClick={() => handleCancelOrder(ord.id)}
+                              disabled={cancellingId === ord.id}
+                              className="px-2.5 py-1 text-[11px] font-bold bg-rose-500/20 hover:bg-rose-500 text-rose-300 hover:text-white rounded-lg transition-colors flex items-center gap-1 ml-auto"
+                            >
+                              <X className="w-3 h-3" />
+                              <span>{cancellingId === ord.id ? 'Cancelling...' : 'Cancel'}</span>
+                            </button>
                           ) : (
-                            <span className="text-gray-500">Market</span>
-                          )}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm">
-                          {getStatusBadge(order.status)}
-                          {order.executedAt && (
-                            <div className="text-xs text-gray-500 mt-1">
-                              {new Date(order.executedAt).toLocaleTimeString('en-IN', {
-                                timeStyle: 'short',
-                              })}
-                            </div>
+                            <span className="text-[11px] text-slate-400">Closed</span>
                           )}
                         </td>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           )}
         </div>
-      </div>
-    </>
+      </main>
+    </div>
   );
 }

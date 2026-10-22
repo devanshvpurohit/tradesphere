@@ -1,26 +1,30 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { marketService } from '@/services/marketService';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(
   request: NextRequest,
   { params }: { params: { symbol: string } }
 ) {
   try {
-    const { symbol } = params;
+    const symbol = decodeURIComponent(params.symbol);
 
     if (!symbol) {
       return NextResponse.json({ error: 'Symbol is required' }, { status: 400 });
     }
 
-    // Fetch quote and time series data with fallback
+    const { searchParams } = new URL(request.url);
+    const period = searchParams.get('period') || '1mo';
+
     const [quote, timeSeries] = await Promise.allSettled([
       marketService.getStockQuote(symbol),
-      marketService.getTimeSeries(symbol, '1mo', '1d'),
+      marketService.getTimeSeries(symbol, period),
     ]);
 
     if (quote.status === 'rejected') {
       return NextResponse.json(
-        { error: 'Market data unavailable for this stock. Please try again later.' },
+        { error: 'Market data unavailable for this stock.' },
         { status: 404 }
       );
     }

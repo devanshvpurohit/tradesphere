@@ -1,51 +1,34 @@
-import { createServerClient } from "@supabase/ssr";
-import { NextResponse, type NextRequest } from "next/server";
+import { NextResponse, type NextRequest } from 'next/server';
 
-export async function middleware(request: NextRequest) {
-  let supabaseResponse = NextResponse.next({
-    request: {
-      headers: request.headers,
-    },
-  });
+export function middleware(request: NextRequest) {
+  const { pathname } = request.nextUrl;
 
-  if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
-    return supabaseResponse;
-  }
+  const token = request.cookies.get('firebase_token')?.value;
+  const uid = request.cookies.get('tradesphere_uid')?.value;
+  const demoId = request.cookies.get('demo_user_id')?.value;
 
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-    {
-      cookies: {
-        getAll() {
-          return request.cookies.getAll();
-        },
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value, options }) => request.cookies.set(name, value));
-          supabaseResponse = NextResponse.next({
-            request,
-          });
-          cookiesToSet.forEach(({ name, value, options }) =>
-            supabaseResponse.cookies.set(name, value, options)
-          );
-        },
-      },
-    }
-  );
+  const isAuthenticated = Boolean(token || uid || demoId);
+  const isAuthRoute = pathname.startsWith('/auth');
+  const isProtectedRoute =
+    pathname.startsWith('/dashboard') ||
+    pathname.startsWith('/portfolio') ||
+    pathname.startsWith('/orders') ||
+    pathname.startsWith('/transactions');
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  const isAuthRoute = request.nextUrl.pathname.startsWith('/auth');
-
-  if (!user && !isAuthRoute && (request.nextUrl.pathname.startsWith('/dashboard') || request.nextUrl.pathname.startsWith('/api/trade'))) {
+  if (!isAuthenticated && isProtectedRoute) {
     const url = request.nextUrl.clone();
     url.pathname = '/auth/signin';
+    url.searchParams.set('redirect', pathname);
     return NextResponse.redirect(url);
   }
 
-  return supabaseResponse;
+  if (isAuthenticated && isAuthRoute) {
+    const url = request.nextUrl.clone();
+    url.pathname = '/dashboard';
+    return NextResponse.redirect(url);
+  }
+
+  return NextResponse.next();
 }
 
 export const config = {

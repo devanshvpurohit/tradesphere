@@ -1,29 +1,23 @@
-import { NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
-
+import { NextRequest, NextResponse } from 'next/server';
+import { getAuthenticatedUser } from '@/lib/firebase/auth-helper';
+import { firebaseDb } from '@/lib/firebase/db';
 import { tradingService } from '@/services/tradingService';
-import { prisma } from '@/lib/prisma';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const supabase = createClient();
-    const { data: { user: authUser } } = await supabase.auth.getUser();
-    const session = authUser ? { user: authUser } : null;
+    const user = await getAuthenticatedUser(request);
 
-    if (!session?.user?.id) {
+    if (!user) {
       return NextResponse.json(
-        { error: 'Unauthorized' },
+        { error: 'Unauthorized. Please sign in or use demo trader.' },
         { status: 401 }
       );
     }
 
-    const user = await prisma.user.findUnique({
-      where: { id: session.user.id },
-    });
-
-    const portfolio = await tradingService.getPortfolio(session.user.id);
+    const userProfile = await firebaseDb.getUser(user.id, user.email);
+    const portfolio = await tradingService.getPortfolio(user.id);
 
     const totalInvested = portfolio.reduce((sum, item) => sum + item.investedValue, 0);
     const totalCurrent = portfolio.reduce((sum, item) => sum + item.currentValue, 0);
@@ -31,20 +25,24 @@ export async function GET() {
     const totalProfitLossPercent = totalInvested > 0 ? (totalProfitLoss / totalInvested) * 100 : 0;
 
     return NextResponse.json({
-      balance: user?.balance || 0,
+      balance: userProfile.balance,
       portfolio,
       summary: {
         totalInvested,
         totalCurrent,
         totalProfitLoss,
         totalProfitLossPercent,
-        totalValue: (user?.balance || 0) + totalCurrent,
+        totalValue: userProfile.balance + totalCurrent,
+      },
+      user: {
+        id: userProfile.id,
+        email: userProfile.email,
       },
     });
   } catch (error) {
     console.error('Error fetching portfolio:', error);
     return NextResponse.json(
-      { error: 'Failed to fetch portfolio' },
+      { error: 'Failed to fetch portfolio data' },
       { status: 500 }
     );
   }
