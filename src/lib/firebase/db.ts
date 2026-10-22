@@ -1,4 +1,5 @@
 import { adminDb } from './admin';
+import { realtimeDb } from './rtdb';
 
 export interface UserDoc {
   id: string;
@@ -96,6 +97,7 @@ export class FirebaseDatabaseService {
    * Update user balance
    */
   async updateUserBalance(userId: string, newBalance: number): Promise<void> {
+    realtimeDb.syncUserBalance(userId, newBalance);
     if (adminDb) {
       try {
         await adminDb.collection('users').doc(userId).set(
@@ -123,6 +125,7 @@ export class FirebaseDatabaseService {
    */
   async resetUserFunds(userId: string): Promise<number> {
     const newBalance = 100000;
+    realtimeDb.syncUserBalance(userId, newBalance);
     if (adminDb) {
       try {
         await adminDb.collection('users').doc(userId).set(
@@ -284,12 +287,27 @@ export class FirebaseDatabaseService {
           };
           transaction.set(txRef, transactionRecord);
 
-          return {
+          const result = {
             success: true,
             message: `Successfully purchased ${quantity} shares of ${symbol} at ₹${price.toFixed(2)}`,
             balance: newBalance,
             portfolio: updatedHolding,
           };
+
+          realtimeDb.syncUserBalance(userId, newBalance);
+          realtimeDb.syncPosition(userId, symbol, updatedHolding.quantity, updatedHolding.avgPrice);
+          realtimeDb.publishOrderEvent({
+            orderId: txRef.id,
+            userId,
+            symbol,
+            side: 'BUY',
+            quantity,
+            price,
+            status: 'EXECUTED',
+            timestamp: now,
+          });
+
+          return result;
         });
       } catch (err: any) {
         console.warn('Firestore buy transaction error:', err);
@@ -413,12 +431,27 @@ export class FirebaseDatabaseService {
           };
           transaction.set(txRef, transactionRecord);
 
-          return {
+          const result = {
             success: true,
             message: `Successfully sold ${quantity} shares of ${symbol} at ₹${price.toFixed(2)}`,
             balance: newBalance,
             portfolio: updatedHolding,
           };
+
+          realtimeDb.syncUserBalance(userId, newBalance);
+          realtimeDb.syncPosition(userId, symbol, updatedHolding?.quantity || 0, updatedHolding?.avgPrice || 0);
+          realtimeDb.publishOrderEvent({
+            orderId: txRef.id,
+            userId,
+            symbol,
+            side: 'SELL',
+            quantity,
+            price,
+            status: 'EXECUTED',
+            timestamp: now,
+          });
+
+          return result;
         });
       } catch (err: any) {
         console.warn('Firestore sell transaction error:', err);
@@ -483,6 +516,16 @@ export class FirebaseDatabaseService {
     if (adminDb) {
       try {
         await adminDb.collection('orders').doc(id).set(newOrder);
+        realtimeDb.publishOrderEvent({
+          orderId: id,
+          userId: newOrder.userId,
+          symbol: newOrder.stockSymbol,
+          side: newOrder.type,
+          quantity: newOrder.quantity,
+          price: newOrder.price || 0,
+          status: newOrder.status,
+          timestamp: newOrder.createdAt,
+        });
         return newOrder;
       } catch (err) {
         console.warn('Firestore createOrder failed, using fallback:', err);

@@ -13,7 +13,12 @@ export function initFirebaseAdmin() {
   const projectId =
     process.env.FIREBASE_PROJECT_ID ||
     process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ||
-    'tradesphere-demo';
+    'tradesphere-37a5c';
+
+  const databaseURL =
+    process.env.FIREBASE_DATABASE_URL ||
+    process.env.NEXT_PUBLIC_FIREBASE_DATABASE_URL ||
+    `https://${projectId}-default-rtdb.firebaseio.com`;
 
   const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
   const privateKey = formatPrivateKey(process.env.FIREBASE_PRIVATE_KEY);
@@ -25,13 +30,15 @@ export function initFirebaseAdmin() {
         clientEmail,
         privateKey,
       }),
+      databaseURL,
     });
   }
 
-  // Fallback initialize with project ID for emulators / development
+  // Fallback initialize with project ID & databaseURL
   try {
     return admin.initializeApp({
       projectId,
+      databaseURL,
     });
   } catch (err) {
     console.warn('Firebase admin initialization warning:', err);
@@ -42,3 +49,4 @@ export function initFirebaseAdmin() {
 export const adminApp = initFirebaseAdmin();
 export const adminAuth = adminApp ? admin.auth(adminApp) : null;
 export const adminDb = adminApp ? admin.firestore(adminApp) : null;
+export const adminRtdb = adminApp ? admin.database(adminApp) : null;

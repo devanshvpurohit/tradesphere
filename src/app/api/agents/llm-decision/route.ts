@@ -6,6 +6,7 @@ import {
   buildAgentEvaluationPrompt,
   parseAgentDecisionJson,
 } from '@/lib/agents/customAgent';
+import { realtimeDb } from '@/lib/firebase/rtdb';
 
 export const dynamic = 'force-dynamic';
 
@@ -280,6 +281,19 @@ export async function POST(request: NextRequest) {
 
     const decision = parseAgentDecisionJson(rawOutput, quote.price, fallbackQty);
     decision.executionTimeMs = Date.now() - startTime;
+
+    // Broadcast AI agent trade signal to Realtime Database
+    realtimeDb.broadcastAgentSignal(symbol, {
+      agentName: agent.name,
+      model: agent.model,
+      provider: agent.provider,
+      action: decision.action,
+      confidence: decision.confidence,
+      targetPrice: decision.targetPrice,
+      stopLoss: decision.stopLoss,
+      reasoning: decision.reasoning,
+      keySignals: decision.keySignals,
+    });
 
     return NextResponse.json({
       success: true,
