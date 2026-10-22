@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useSession } from '@/components/AuthContext';
 import { BrokerConnectModal, BrokerConfig } from '@/components/broker/BrokerConnectModal';
+import { VideoDemoModal } from '@/components/video/VideoDemoModal';
 import {
   TrendingUp,
   TrendingDown,
@@ -14,6 +15,7 @@ import {
   Sparkles,
   Menu,
   Zap,
+  Play,
 } from 'lucide-react';
 
 interface TickerItem {
@@ -42,6 +44,7 @@ export default function TopNav({ onToggleMobileSidebar }: { onToggleMobileSideba
   const [balance, setBalance] = useState<number | null>(null);
   const [isResetting, setIsResetting] = useState(false);
   const [isBrokerModalOpen, setIsBrokerModalOpen] = useState(false);
+  const [isVideoModalOpen, setIsVideoModalOpen] = useState(false);
   const [activeBrokerProvider, setActiveBrokerProvider] = useState<string>('auto');
 
   useEffect(() => {
@@ -183,6 +186,16 @@ export default function TopNav({ onToggleMobileSidebar }: { onToggleMobileSideba
             </span>
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
           </button>
+
+          {/* Watch Video Demo Button */}
+          <button
+            onClick={() => setIsVideoModalOpen(true)}
+            className="flex items-center gap-1.5 bg-emerald-950/40 hover:bg-emerald-900/50 border border-emerald-500/30 hover:border-emerald-400/60 px-2.5 py-1.5 rounded-full text-[11px] font-mono text-emerald-300 transition-all shadow-sm shadow-emerald-500/10"
+            title="Watch Institutional Video Showcase & Architecture Tour"
+          >
+            <Play className="w-3 h-3 text-emerald-400 fill-emerald-400" />
+            <span className="font-semibold uppercase tracking-wider hidden sm:inline">Watch Demo</span>
+          </button>
         </div>
 
         {/* Right Side: Virtual Funds & Account Info */}
@@ -262,6 +275,11 @@ export default function TopNav({ onToggleMobileSidebar }: { onToggleMobileSideba
         isOpen={isBrokerModalOpen}
         onClose={() => setIsBrokerModalOpen(false)}
         onProviderChange={(cfg) => setActiveBrokerProvider(cfg.provider)}
+      />
+
+      <VideoDemoModal
+        isOpen={isVideoModalOpen}
+        onClose={() => setIsVideoModalOpen(false)}
       />
     </header>
   );

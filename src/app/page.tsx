@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { toast } from 'sonner';
 import { soundManager } from '@/lib/sound';
 import confetti from 'canvas-confetti';
+import { VideoDemoModal } from '@/components/video/VideoDemoModal';
 import {
   TrendingUp,
   TrendingDown,
@@ -70,6 +71,7 @@ export default function Home() {
   const [stocks, setStocks] = useState<ExploreStock[]>([]);
   const [loadingStocks, setLoadingStocks] = useState(true);
   const [selectedStock, setSelectedStock] = useState('RELIANCE.NS');
+  const [isVideoModalOpen, setIsVideoModalOpen] = useState(false);
 
   // AI Agent Broker State
   const [activeModel, setActiveModel] = useState('gemma3:1b');
@@ -249,6 +251,14 @@ export default function Home() {
             <Bot className="w-4 h-4 text-blue-400" />
             <span>Launch AI Agent Studio</span>
           </Link>
+
+          <button
+            onClick={() => setIsVideoModalOpen(true)}
+            className="w-full sm:w-auto px-6 py-3.5 rounded-2xl bg-emerald-950/40 hover:bg-emerald-900/50 border border-emerald-500/30 hover:border-emerald-400/60 text-emerald-300 font-bold text-sm transition-all flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/10 active:scale-[0.98]"
+          >
+            <Play className="w-4 h-4 text-emerald-400 fill-emerald-400" />
+            <span>Watch Video Tour</span>
+          </button>
         </div>
       </section>
 
@@ -615,6 +625,11 @@ export default function Home() {
           </div>
         </div>
       </footer>
+
+      <VideoDemoModal
+        isOpen={isVideoModalOpen}
+        onClose={() => setIsVideoModalOpen(false)}
+      />
     </div>
   );
 }
