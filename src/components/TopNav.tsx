@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useSession } from '@/components/AuthContext';
+import { BrokerConnectModal, BrokerConfig } from '@/components/broker/BrokerConnectModal';
 import {
   TrendingUp,
   TrendingDown,
@@ -12,6 +13,7 @@ import {
   ShieldCheck,
   Sparkles,
   Menu,
+  Zap,
 } from 'lucide-react';
 
 interface TickerItem {
@@ -39,6 +41,20 @@ export default function TopNav({ onToggleMobileSidebar }: { onToggleMobileSideba
   const [timeStr, setTimeStr] = useState<string>('');
   const [balance, setBalance] = useState<number | null>(null);
   const [isResetting, setIsResetting] = useState(false);
+  const [isBrokerModalOpen, setIsBrokerModalOpen] = useState(false);
+  const [activeBrokerProvider, setActiveBrokerProvider] = useState<string>('auto');
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('tradesphere_broker_config');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.provider) setActiveBrokerProvider(parsed.provider);
+      }
+    } catch {
+      // Ignore
+    }
+  }, []);
 
   useEffect(() => {
     const updateTime = () => {
@@ -144,6 +160,29 @@ export default function TopNav({ onToggleMobileSidebar }: { onToggleMobileSideba
               IST {timeStr || '09:15:00'}
             </span>
           </div>
+
+          {/* Broker Gateway Selector Pill */}
+          <button
+            onClick={() => setIsBrokerModalOpen(true)}
+            className="flex items-center gap-1.5 bg-blue-950/40 hover:bg-blue-900/50 border border-blue-500/30 hover:border-blue-400/50 px-2.5 py-1.5 rounded-full text-[11px] font-mono text-blue-300 transition-all shadow-sm shadow-blue-500/10"
+            title="Configure Market Data Gateway & Direct Broker APIs"
+          >
+            <Zap className="w-3.5 h-3.5 text-blue-400" />
+            <span className="font-semibold uppercase">
+              {activeBrokerProvider === 'kite'
+                ? 'Zerodha Kite'
+                : activeBrokerProvider === 'dhan'
+                ? 'DhanHQ'
+                : activeBrokerProvider === 'upstox'
+                ? 'Upstox'
+                : activeBrokerProvider === 'angelone'
+                ? 'Angel One'
+                : activeBrokerProvider === 'bhavcopy'
+                ? 'NSE Bhavcopy'
+                : 'Broker Gateway'}
+            </span>
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+          </button>
         </div>
 
         {/* Right Side: Virtual Funds & Account Info */}
@@ -218,6 +257,12 @@ export default function TopNav({ onToggleMobileSidebar }: { onToggleMobileSideba
           )}
         </div>
       </div>
+
+      <BrokerConnectModal
+        isOpen={isBrokerModalOpen}
+        onClose={() => setIsBrokerModalOpen(false)}
+        onProviderChange={(cfg) => setActiveBrokerProvider(cfg.provider)}
+      />
     </header>
   );
 }
