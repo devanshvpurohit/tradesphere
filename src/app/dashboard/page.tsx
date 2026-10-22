@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import Link from 'next/link';
 import Sidebar from '@/components/Sidebar';
 import TopNav from '@/components/TopNav';
@@ -20,6 +20,10 @@ import {
   ChevronRight,
   ShieldCheck,
   Zap,
+  Search,
+  LineChart,
+  Activity,
+  RefreshCw,
 } from 'lucide-react';
 
 interface PortfolioSummary {
@@ -34,12 +38,31 @@ interface PortfolioSummary {
   };
 }
 
-const FEATURED_TICKERS = [
-  { symbol: 'RELIANCE.NS', name: 'Reliance Industries', price: 2982.4, change: 1.15 },
-  { symbol: 'TCS.NS', name: 'Tata Consultancy Services', price: 3845.0, change: -0.35 },
-  { symbol: 'HDFCBANK.NS', name: 'HDFC Bank', price: 1678.5, change: 0.42 },
-  { symbol: 'INFY.NS', name: 'Infosys', price: 1824.1, change: 1.62 },
-  { symbol: 'NVDA', name: 'NVIDIA Corp', price: 138.25, change: 2.41 },
+interface StockQuote {
+  symbol: string;
+  name: string;
+  price: number;
+  change: number;
+  changePercent: number;
+  high: number;
+  low: number;
+  open: number;
+  previousClose: number;
+  volume: number;
+  marketCap?: string;
+  peRatio?: number;
+  week52High?: number;
+  week52Low?: number;
+  sector?: string;
+  currency?: string;
+}
+
+const DEFAULT_INDIAN_FALLBACK: StockQuote[] = [
+  { symbol: 'RELIANCE.NS', name: 'Reliance Industries', price: 2982.4, change: 33.8, changePercent: 1.15, high: 2995, low: 2950, open: 2955, previousClose: 2948.6, volume: 4520000, sector: 'Energy' },
+  { symbol: 'TCS.NS', name: 'Tata Consultancy Services', price: 3845.0, change: -13.5, changePercent: -0.35, high: 3870, low: 3830, open: 3860, previousClose: 3858.5, volume: 1890000, sector: 'IT Services' },
+  { symbol: 'HDFCBANK.NS', name: 'HDFC Bank Ltd.', price: 1678.5, change: 7.0, changePercent: 0.42, high: 1685, low: 1665, open: 1670, previousClose: 1671.5, volume: 8420000, sector: 'Banking' },
+  { symbol: 'INFY.NS', name: 'Infosys Limited', price: 1824.1, change: 29.1, changePercent: 1.62, high: 1835, low: 1800, open: 1805, previousClose: 1795.0, volume: 3210000, sector: 'IT Services' },
+  { symbol: 'ICICIBANK.NS', name: 'ICICI Bank Ltd.', price: 1245.0, change: 11.2, changePercent: 0.91, high: 1252, low: 1235, open: 1238, previousClose: 1233.8, volume: 5600000, sector: 'Banking' },
 ];
 
 export default function Dashboard() {
@@ -48,6 +71,14 @@ export default function Dashboard() {
   const [recentOrders, setRecentOrders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+
+  // Live Market Leaders State
+  const [indianStocks, setIndianStocks] = useState<StockQuote[]>(DEFAULT_INDIAN_FALLBACK);
+  const [usStocks, setUsStocks] = useState<StockQuote[]>([]);
+  const [loadingMarket, setLoadingMarket] = useState(true);
+  const [activeMarketTab, setActiveMarketTab] = useState<'INDIAN' | 'US' | 'GAINERS' | 'LOSERS'>('INDIAN');
+  const [marketSearchQuery, setMarketSearchQuery] = useState('');
+  const [lastRefreshed, setLastRefreshed] = useState<Date>(new Date());
 
   // Trading Modal State
   const [modalOpen, setModalOpen] = useState(false);
@@ -60,7 +91,43 @@ export default function Dashboard() {
 
   useEffect(() => {
     fetchDashboardData();
+    fetchMarketData();
+
+    // Auto-poll live quotes every 12 seconds
+    const interval = setInterval(() => {
+      fetchMarketData(false);
+    }, 12000);
+    return () => clearInterval(interval);
   }, []);
+
+  const fetchMarketData = async (showLoading = true) => {
+    try {
+      if (showLoading) setLoadingMarket(true);
+      const [indRes, usRes] = await Promise.allSettled([
+        fetch('/api/stocks?market=indian'),
+        fetch('/api/stocks?market=us'),
+      ]);
+
+      if (indRes.status === 'fulfilled' && indRes.value.ok) {
+        const indData = await indRes.value.json();
+        if (indData.stocks && indData.stocks.length > 0) {
+          setIndianStocks(indData.stocks);
+        }
+      }
+
+      if (usRes.status === 'fulfilled' && usRes.value.ok) {
+        const usData = await usRes.value.json();
+        if (usData.stocks && usData.stocks.length > 0) {
+          setUsStocks(usData.stocks);
+        }
+      }
+      setLastRefreshed(new Date());
+    } catch (err) {
+      console.error('Error fetching market stocks for dashboard:', err);
+    } finally {
+      if (showLoading) setLoadingMarket(false);
+    }
+  };
 
   const fetchDashboardData = async () => {
     try {
@@ -90,6 +157,33 @@ export default function Dashboard() {
     setSelectedStock({ symbol, name, price, side });
     setModalOpen(true);
   };
+
+  // Market filter & tab logic
+  const displayedMarketLeaders = useMemo(() => {
+    let pool: StockQuote[] = [];
+
+    if (activeMarketTab === 'INDIAN') {
+      pool = indianStocks;
+    } else if (activeMarketTab === 'US') {
+      pool = usStocks;
+    } else if (activeMarketTab === 'GAINERS') {
+      pool = [...indianStocks, ...usStocks].sort((a, b) => b.changePercent - a.changePercent);
+    } else if (activeMarketTab === 'LOSERS') {
+      pool = [...indianStocks, ...usStocks].sort((a, b) => a.changePercent - b.changePercent);
+    }
+
+    if (marketSearchQuery.trim()) {
+      const q = marketSearchQuery.toLowerCase();
+      pool = pool.filter(
+        (s) =>
+          s.symbol.toLowerCase().includes(q) ||
+          s.name.toLowerCase().includes(q) ||
+          (s.sector && s.sector.toLowerCase().includes(q))
+      );
+    }
+
+    return pool;
+  }, [activeMarketTab, indianStocks, usStocks, marketSearchQuery]);
 
   const isProfitable = (data?.summary.totalProfitLoss ?? 0) >= 0;
   const balance = data?.balance ?? 100000;
@@ -250,64 +344,215 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Featured Market Movers Bar */}
-        <div className="mb-8">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-yellow-400" />
-              <h2 className="text-base font-bold text-white tracking-tight">Active Market Leaders</h2>
+        {/* Active Market Leaders Section */}
+        <div className="mb-8 bg-slate-900/60 border border-slate-800/80 rounded-2xl p-5 sm:p-6 shadow-xl">
+          {/* Header row */}
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-5">
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <Sparkles className="w-4 h-4 text-amber-400" />
+                <h2 className="text-base font-bold text-white tracking-tight">Active Market Leaders</h2>
+                <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  LIVE STREAM
+                </span>
+              </div>
+              <p className="text-xs text-slate-400">
+                Real-time NSE &amp; NASDAQ quotes with instant 1-click execution &amp; 52-week telemetry
+              </p>
             </div>
-            <Link
-              href="/stocks"
-              className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1 font-semibold"
-            >
-              <span>View All 20+ Equities</span>
-              <ChevronRight className="w-3.5 h-3.5" />
-            </Link>
+
+            <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+              {/* Search input */}
+              <div className="relative min-w-[200px] sm:min-w-[240px]">
+                <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Filter scrip (e.g. RELIANCE, NVDA)..."
+                  value={marketSearchQuery}
+                  onChange={(e) => setMarketSearchQuery(e.target.value)}
+                  className="w-full pl-9 pr-3 py-1.5 bg-slate-950/80 border border-slate-800 rounded-xl text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500 transition-colors"
+                />
+              </div>
+
+              {/* View all button */}
+              <Link
+                href="/stocks"
+                className="px-3 py-1.5 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 hover:text-blue-300 border border-blue-500/30 rounded-xl text-xs font-semibold flex items-center gap-1 transition-all whitespace-nowrap"
+              >
+                <span>Full Terminal</span>
+                <ChevronRight className="w-3.5 h-3.5" />
+              </Link>
+            </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-            {FEATURED_TICKERS.map((stock) => {
-              const isUp = stock.change >= 0;
-              return (
-                <div
-                  key={stock.symbol}
-                  className="p-4 bg-slate-900/60 hover:bg-slate-900 border border-slate-800/80 hover:border-slate-700 rounded-xl transition-all group flex flex-col justify-between"
-                >
-                  <div className="flex items-start justify-between mb-2">
+          {/* Category Tabs */}
+          <div className="flex items-center gap-2 mb-5 overflow-x-auto pb-1 scrollbar-none border-b border-slate-800/80">
+            <button
+              onClick={() => setActiveMarketTab('INDIAN')}
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                activeMarketTab === 'INDIAN'
+                  ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20'
+                  : 'bg-slate-950/60 text-slate-400 hover:text-white border border-slate-800/80'
+              }`}
+            >
+              Indian Equities (NSE) ({indianStocks.length})
+            </button>
+            <button
+              onClick={() => setActiveMarketTab('US')}
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                activeMarketTab === 'US'
+                  ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20'
+                  : 'bg-slate-950/60 text-slate-400 hover:text-white border border-slate-800/80'
+              }`}
+            >
+              US Tech Giants (NASDAQ) ({usStocks.length})
+            </button>
+            <button
+              onClick={() => setActiveMarketTab('GAINERS')}
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 ${
+                activeMarketTab === 'GAINERS'
+                  ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/20'
+                  : 'bg-slate-950/60 text-slate-400 hover:text-white border border-slate-800/80'
+              }`}
+            >
+              <TrendingUp className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Top Gainers</span>
+            </button>
+            <button
+              onClick={() => setActiveMarketTab('LOSERS')}
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 ${
+                activeMarketTab === 'LOSERS'
+                  ? 'bg-rose-600 text-white shadow-lg shadow-rose-600/20'
+                  : 'bg-slate-950/60 text-slate-400 hover:text-white border border-slate-800/80'
+              }`}
+            >
+              <TrendingDown className="w-3.5 h-3.5 text-rose-400" />
+              <span>Top Losers</span>
+            </button>
+          </div>
+
+          {/* Cards Grid */}
+          {loadingMarket && displayedMarketLeaders.length === 0 ? (
+            <div className="py-12 text-center text-slate-400 text-xs">
+              <div className="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-2" />
+              Connecting to real-time quotes feed...
+            </div>
+          ) : displayedMarketLeaders.length === 0 ? (
+            <div className="py-8 text-center border border-dashed border-slate-800 rounded-xl">
+              <p className="text-slate-400 text-xs">No scrips matched &quot;{marketSearchQuery}&quot;</p>
+              <button
+                onClick={() => setMarketSearchQuery('')}
+                className="mt-2 text-xs text-blue-400 hover:underline font-semibold"
+              >
+                Clear filter
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3.5">
+              {displayedMarketLeaders.slice(0, 10).map((stock) => {
+                const isPositive = stock.change >= 0;
+                const currency = stock.symbol.endsWith('.NS') ? '₹' : '$';
+                const low52 = stock.week52Low || stock.price * 0.82;
+                const high52 = stock.week52High || stock.price * 1.25;
+                const range52Percent = Math.min(
+                  100,
+                  Math.max(0, ((stock.price - low52) / (high52 - low52)) * 100)
+                );
+
+                return (
+                  <div
+                    key={stock.symbol}
+                    className="p-4 bg-slate-950/70 hover:bg-slate-900 border border-slate-800/80 hover:border-slate-700 rounded-xl transition-all group flex flex-col justify-between shadow-sm hover:shadow-md"
+                  >
                     <div>
+                      {/* Top Header: Symbol + Exchange + Day % */}
+                      <div className="flex items-start justify-between gap-1 mb-2">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <Link
+                              href={`/stocks/${stock.symbol}`}
+                              className="text-xs font-bold text-white group-hover:text-blue-400 transition-colors truncate"
+                            >
+                              {stock.symbol}
+                            </Link>
+                            <span className="text-[9px] font-mono px-1 py-0.2 rounded bg-slate-800 text-slate-400">
+                              {stock.symbol.endsWith('.NS') ? 'NSE' : 'NASDAQ'}
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-slate-400 truncate max-w-[130px] mt-0.5">
+                            {stock.name}
+                          </p>
+                        </div>
+                        <span
+                          className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded flex items-center gap-0.5 whitespace-nowrap ${
+                            isPositive
+                              ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                              : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+                          }`}
+                        >
+                          {isPositive ? '+' : ''}
+                          {stock.changePercent.toFixed(2)}%
+                        </span>
+                      </div>
+
+                      {/* Price & Change */}
+                      <div className="my-2.5">
+                        <div className="text-base font-extrabold font-mono text-white tracking-tight">
+                          {currency}{stock.price.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </div>
+                        <div
+                          className={`text-[10px] font-mono font-semibold ${
+                            isPositive ? 'text-emerald-400' : 'text-rose-400'
+                          }`}
+                        >
+                          {isPositive ? '+' : ''}{currency}{stock.change.toFixed(2)}
+                        </div>
+                      </div>
+
+                      {/* 52W Range Micro Bar */}
+                      <div className="mb-3 p-2 rounded-lg bg-slate-900/90 border border-slate-800/60">
+                        <div className="flex justify-between text-[9px] font-mono text-slate-400 mb-1">
+                          <span>L: {currency}{low52.toFixed(0)}</span>
+                          <span className="text-[8px] text-slate-500 uppercase">52W Range</span>
+                          <span>H: {currency}{high52.toFixed(0)}</span>
+                        </div>
+                        <div className="w-full bg-slate-800 h-1 rounded-full overflow-hidden">
+                          <div
+                            style={{ width: `${range52Percent}%` }}
+                            className={`h-full rounded-full ${isPositive ? 'bg-emerald-500' : 'bg-rose-500'}`}
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Action buttons */}
+                    <div className="grid grid-cols-3 gap-1.5 pt-2 border-t border-slate-800/80">
+                      <button
+                        onClick={() => handleOpenTrade(stock.symbol, stock.name, stock.price, 'BUY')}
+                        className="py-1 px-1.5 bg-blue-600/30 hover:bg-blue-600 text-blue-300 hover:text-white text-[10px] font-bold rounded-lg transition-colors text-center"
+                      >
+                        BUY
+                      </button>
+                      <button
+                        onClick={() => handleOpenTrade(stock.symbol, stock.name, stock.price, 'SELL')}
+                        className="py-1 px-1.5 bg-rose-600/30 hover:bg-rose-600 text-rose-300 hover:text-white text-[10px] font-bold rounded-lg transition-colors text-center"
+                      >
+                        SELL
+                      </button>
                       <Link
                         href={`/stocks/${stock.symbol}`}
-                        className="text-xs font-bold text-white group-hover:text-blue-400 transition-colors"
+                        className="py-1 px-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-[10px] font-bold rounded-lg transition-colors flex items-center justify-center gap-0.5"
                       >
-                        {stock.symbol}
+                        <LineChart className="w-2.5 h-2.5" />
+                        <span>Chart</span>
                       </Link>
-                      <p className="text-[10px] text-slate-400 truncate max-w-[110px]">{stock.name}</p>
                     </div>
-                    <span
-                      className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded ${
-                        isUp ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'
-                      }`}
-                    >
-                      {isUp ? '+' : ''}{stock.change}%
-                    </span>
                   </div>
-
-                  <div className="flex items-baseline justify-between mt-2">
-                    <span className="text-sm font-mono font-bold text-white">
-                      ₹{stock.price.toLocaleString('en-IN')}
-                    </span>
-                    <button
-                      onClick={() => handleOpenTrade(stock.symbol, stock.name, stock.price, 'BUY')}
-                      className="text-[10px] font-bold px-2 py-1 bg-blue-600/30 hover:bg-blue-600 text-blue-300 hover:text-white rounded-md transition-colors"
-                    >
-                      BUY
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {/* Holdings Table & Recent Orders Grid */}
