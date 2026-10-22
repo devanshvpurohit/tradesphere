@@ -14,10 +14,16 @@ export async function POST(request: NextRequest) {
     const {
       systemPrompt,
       decisionRules,
-      maxAllocationPerStock = 20000,
+      takeProfitPercent,
+      stopLossPercent,
+      rsiBuyThreshold,
+      rsiShortThreshold,
+      minConfidence,
+      maxAllocationPerStock = 15000,
       allowShorts = true,
       universe,
       productType = 'MIS',
+      llmConfig,
     } = body;
 
     const result = await wholeMarketAgentService.runWholeMarketCycle({
@@ -25,10 +31,16 @@ export async function POST(request: NextRequest) {
       userEmail,
       systemPrompt: systemPrompt || 'Maximize risk-adjusted returns with intraday momentum dips and overbought short breakdowns.',
       decisionRules: decisionRules || '1. Buy Long on RSI < 40 + EMA breakout.\n2. Short Sell on RSI > 68.\n3. Take profit at +2.5%, stop loss at -1.2%.',
+      takeProfitPercent: typeof takeProfitPercent === 'number' ? takeProfitPercent : 2.5,
+      stopLossPercent: typeof stopLossPercent === 'number' ? stopLossPercent : 1.2,
+      rsiBuyThreshold: typeof rsiBuyThreshold === 'number' ? rsiBuyThreshold : 40,
+      rsiShortThreshold: typeof rsiShortThreshold === 'number' ? rsiShortThreshold : 68,
+      minConfidence: typeof minConfidence === 'number' ? minConfidence : 70,
       maxAllocationPerStock,
       allowShorts,
       universe,
       productType,
+      llmConfig,
     });
 
     return NextResponse.json(result);

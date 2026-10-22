@@ -24,13 +24,100 @@ import {
   Clock,
   Radio,
   Check,
+  ChevronDown,
+  ChevronUp,
+  Save,
+  Plus,
+  X,
+  Sparkles,
+  SlidersHorizontal,
+  FileCode2,
+  Bot,
+  Key,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import {
   MarketSignalRecord,
   WholeMarketExecutionItem,
   WholeMarketScanResult,
   WHOLE_MARKET_UNIVERSE,
+  STRATEGY_PRESETS,
+  StrategyPreset,
+  WholeMarketAgentConfig,
+  AIProvider,
+  WholeMarketLLMConfig,
 } from '@/lib/agents/wholeMarketTypes';
+
+const LLM_PROVIDERS: {
+  id: AIProvider;
+  name: string;
+  icon: string;
+  description: string;
+  requiresKey: boolean;
+  models: { id: string; name: string }[];
+}[] = [
+  {
+    id: 'groq',
+    name: 'Groq LPU (Ultra-Fast 500+ t/s)',
+    icon: '⚡',
+    description: 'Sub-second real-time inference optimized for high-frequency quant sweeps.',
+    requiresKey: true,
+    models: [
+      { id: 'llama-3.3-70b-versatile', name: 'Llama 3.3 70B Versatile (Recommended)' },
+      { id: 'mixtral-8x7b-32768', name: 'Mixtral 8x7B MoE' },
+      { id: 'gemma2-9b-it', name: 'Gemma 2 9B IT' },
+    ],
+  },
+  {
+    id: 'ollama',
+    name: 'Ollama (Local / Offline / Free)',
+    icon: '🦙',
+    description: '100% private on localhost:11434 with zero API cost or rate limits.',
+    requiresKey: false,
+    models: [
+      { id: 'gemma3:1b', name: 'Gemma 3 1B (Ultra-fast Local)' },
+      { id: 'llama3.2', name: 'Llama 3.2 3B' },
+      { id: 'deepseek-r1', name: 'DeepSeek R1 (Reasoning)' },
+      { id: 'mistral', name: 'Mistral 7B' },
+      { id: 'qwen2.5-coder', name: 'Qwen 2.5 Coder' },
+    ],
+  },
+  {
+    id: 'gemini',
+    name: 'Google Gemini',
+    icon: '🔵',
+    description: 'Flagship multimodal speed and massive context reasoning.',
+    requiresKey: true,
+    models: [
+      { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash (Super Fast)' },
+      { id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro (Deep Quantitative Reasoning)' },
+      { id: 'gemini-2.0-flash-exp', name: 'Gemini 2.0 Flash (Next-Gen)' },
+    ],
+  },
+  {
+    id: 'openai',
+    name: 'OpenAI GPT-4o',
+    icon: '🟢',
+    description: 'Institutional-grade market reasoning and structured decision synthesis.',
+    requiresKey: true,
+    models: [
+      { id: 'gpt-4o-mini', name: 'GPT-4o Mini (High-Speed)' },
+      { id: 'gpt-4o', name: 'GPT-4o (Flagship Multimodal)' },
+    ],
+  },
+  {
+    id: 'anthropic',
+    name: 'Anthropic Claude',
+    icon: '🟣',
+    description: 'Rigorous chain-of-thought risk evaluation and discipline.',
+    requiresKey: true,
+    models: [
+      { id: 'claude-3-5-haiku-20241022', name: 'Claude 3.5 Haiku (Fast)' },
+      { id: 'claude-3-5-sonnet-20241022', name: 'Claude 3.5 Sonnet (Institutional)' },
+    ],
+  },
+];
 
 interface WholeMarketDeskProps {
   systemPrompt?: string;
@@ -39,18 +126,45 @@ interface WholeMarketDeskProps {
 }
 
 export function WholeMarketDesk({
-  systemPrompt = 'You are an aggressive autonomous quantitative desk. Scan the entire market universe. Buy momentum pullbacks on oversold confluence. Short sell overbought exhaustion breakdowns. Take profit at +2.5% and stop loss at -1.2%.',
-  decisionRules = '1. Buy Long on RSI < 40 + EMA crossover.\n2. Short Sell on RSI > 68.\n3. Take profit at +2.5%, stop loss at -1.2%.\n4. Sizing: MIS 5x leverage.',
+  systemPrompt: initialPrompt = 'You are an aggressive autonomous quantitative desk. Scan the entire market universe. Buy momentum pullbacks on oversold confluence. Short sell overbought exhaustion breakdowns. Take profit at +2.5% and stop loss at -1.2%.',
+  decisionRules: initialRules = '1. Buy Long on RSI < 40 + EMA breakout.\n2. Short Sell on RSI > 68.\n3. Take profit at +2.5%, stop loss at -1.2%.\n4. Sizing: MIS 5x leverage.',
   onTradeExecuted,
 }: WholeMarketDeskProps) {
+  // Runner State
   const [isRunning, setIsRunning] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [cycleCount, setCycleCount] = useState(0);
   const [countdown, setCountdown] = useState(20);
-  const [intervalSec, setIntervalSec] = useState(20);
-  const [allowShorts, setAllowShorts] = useState(true);
-  const [universeMode, setUniverseMode] = useState<'ALL' | 'INDIAN'>('ALL');
 
+  // Customization Suite Drawer State
+  const [isCustomizing, setIsCustomizing] = useState(false);
+  const [activePresetId, setActivePresetId] = useState<string>('custom');
+
+  // Core Customizable Parameters
+  const [systemPrompt, setSystemPrompt] = useState(initialPrompt);
+  const [decisionRules, setDecisionRules] = useState(initialRules);
+  const [takeProfitPercent, setTakeProfitPercent] = useState<number>(2.5);
+  const [stopLossPercent, setStopLossPercent] = useState<number>(1.2);
+  const [rsiBuyThreshold, setRsiBuyThreshold] = useState<number>(40);
+  const [rsiShortThreshold, setRsiShortThreshold] = useState<number>(68);
+  const [minConfidence, setMinConfidence] = useState<number>(70);
+  const [maxAllocationPerStock, setMaxAllocationPerStock] = useState<number>(15000);
+  const [productType, setProductType] = useState<'MIS' | 'CNC'>('MIS');
+  const [allowShorts, setAllowShorts] = useState<boolean>(true);
+  const [intervalSec, setIntervalSec] = useState<number>(20);
+  const [customUniverse, setCustomUniverse] = useState<string[]>(WHOLE_MARKET_UNIVERSE);
+  const [newTickerInput, setNewTickerInput] = useState<string>('');
+
+  // LLM Engine State
+  const [enableLLM, setEnableLLM] = useState<boolean>(true);
+  const [llmProvider, setLlmProvider] = useState<AIProvider>('groq');
+  const [llmModel, setLlmModel] = useState<string>('llama-3.3-70b-versatile');
+  const [llmApiKey, setLlmApiKey] = useState<string>('');
+  const [ollamaBaseUrl, setOllamaBaseUrl] = useState<string>('http://localhost:11434');
+  const [showApiKey, setShowApiKey] = useState<boolean>(false);
+  const [temperature, setTemperature] = useState<number>(0.1);
+
+  // Results State
   const [scanResult, setScanResult] = useState<WholeMarketScanResult | null>(null);
   const [executionLogs, setExecutionLogs] = useState<WholeMarketExecutionItem[]>([]);
   const [activeSignals, setActiveSignals] = useState<MarketSignalRecord[]>([]);
@@ -58,19 +172,179 @@ export function WholeMarketDesk({
   const runnerTimerRef = useRef<NodeJS.Timeout | null>(null);
   const countdownTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Stop runner cleanup on unmount
+  // Hydrate custom config & API keys from localStorage on mount
   useEffect(() => {
-    return () => {
-      if (runnerTimerRef.current) clearInterval(runnerTimerRef.current);
-      if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
-    };
+    try {
+      // 1. Load saved API keys from Agent Playground/Copilot
+      const savedKeys = JSON.parse(localStorage.getItem('tradesphere_api_keys') || '{}');
+      if (savedKeys[llmProvider]) {
+        setLlmApiKey(savedKeys[llmProvider]);
+      }
+
+      // 2. Load whole-market custom config
+      const savedConfig = localStorage.getItem('tradesphere_whole_market_config');
+      if (savedConfig) {
+        const parsed = JSON.parse(savedConfig);
+        if (parsed.systemPrompt) setSystemPrompt(parsed.systemPrompt);
+        if (parsed.decisionRules) setDecisionRules(parsed.decisionRules);
+        if (typeof parsed.takeProfitPercent === 'number') setTakeProfitPercent(parsed.takeProfitPercent);
+        if (typeof parsed.stopLossPercent === 'number') setStopLossPercent(parsed.stopLossPercent);
+        if (typeof parsed.rsiBuyThreshold === 'number') setRsiBuyThreshold(parsed.rsiBuyThreshold);
+        if (typeof parsed.rsiShortThreshold === 'number') setRsiShortThreshold(parsed.rsiShortThreshold);
+        if (typeof parsed.minConfidence === 'number') setMinConfidence(parsed.minConfidence);
+        if (typeof parsed.maxAllocationPerStock === 'number') setMaxAllocationPerStock(parsed.maxAllocationPerStock);
+        if (parsed.productType) setProductType(parsed.productType);
+        if (typeof parsed.allowShorts === 'boolean') setAllowShorts(parsed.allowShorts);
+        if (typeof parsed.intervalSec === 'number') {
+          setIntervalSec(parsed.intervalSec);
+          setCountdown(parsed.intervalSec);
+        }
+        if (Array.isArray(parsed.universe) && parsed.universe.length > 0) {
+          setCustomUniverse(parsed.universe);
+        }
+        if (parsed.activePresetId) setActivePresetId(parsed.activePresetId);
+        if (typeof parsed.enableLLM === 'boolean') setEnableLLM(parsed.enableLLM);
+        if (parsed.llmProvider) {
+          setLlmProvider(parsed.llmProvider);
+          if (savedKeys[parsed.llmProvider]) {
+            setLlmApiKey(savedKeys[parsed.llmProvider]);
+          } else if (parsed.llmApiKey) {
+            setLlmApiKey(parsed.llmApiKey);
+          }
+        }
+        if (parsed.llmModel) setLlmModel(parsed.llmModel);
+        if (parsed.ollamaBaseUrl) setOllamaBaseUrl(parsed.ollamaBaseUrl);
+        if (typeof parsed.temperature === 'number') setTemperature(parsed.temperature);
+      }
+    } catch (e) {
+      console.warn('Failed loading whole-market custom config from localStorage:', e);
+    }
   }, []);
 
-  const getActiveUniverse = () => {
-    if (universeMode === 'INDIAN') {
-      return WHOLE_MARKET_UNIVERSE.filter((s) => s.endsWith('.NS'));
+  // Update model & API key when provider changes
+  const handleSelectProvider = (prov: AIProvider) => {
+    setLlmProvider(prov);
+    const providerMeta = LLM_PROVIDERS.find((p) => p.id === prov);
+    if (providerMeta && providerMeta.models.length > 0) {
+      setLlmModel(providerMeta.models[0].id);
     }
-    return WHOLE_MARKET_UNIVERSE;
+    const savedKeys = JSON.parse(localStorage.getItem('tradesphere_api_keys') || '{}');
+    if (savedKeys[prov]) {
+      setLlmApiKey(savedKeys[prov]);
+    } else {
+      setLlmApiKey('');
+    }
+  };
+
+  // Save config to localStorage
+  const handleSaveConfig = () => {
+    try {
+      const configToSave = {
+        activePresetId,
+        systemPrompt,
+        decisionRules,
+        takeProfitPercent,
+        stopLossPercent,
+        rsiBuyThreshold,
+        rsiShortThreshold,
+        minConfidence,
+        maxAllocationPerStock,
+        productType,
+        allowShorts,
+        intervalSec,
+        universe: customUniverse,
+        enableLLM,
+        llmProvider,
+        llmModel,
+        llmApiKey,
+        ollamaBaseUrl,
+        temperature,
+      };
+      localStorage.setItem('tradesphere_whole_market_config', JSON.stringify(configToSave));
+
+      // Also persist API key in the shared tradesphere_api_keys
+      if (llmApiKey) {
+        const savedKeys = JSON.parse(localStorage.getItem('tradesphere_api_keys') || '{}');
+        savedKeys[llmProvider] = llmApiKey;
+        localStorage.setItem('tradesphere_api_keys', JSON.stringify(savedKeys));
+      }
+
+      toast.success('Agent Configuration & LLM Settings Saved!', {
+        description: `Active Model: ${llmProvider.toUpperCase()} (${llmModel}). Risk parameters and universe are synchronized.`,
+      });
+    } catch (e) {
+      toast.error('Failed to save configuration');
+    }
+  };
+
+  // Reset config to defaults
+  const handleResetDefaults = () => {
+    setActivePresetId('custom');
+    setSystemPrompt(initialPrompt);
+    setDecisionRules(initialRules);
+    setTakeProfitPercent(2.5);
+    setStopLossPercent(1.2);
+    setRsiBuyThreshold(40);
+    setRsiShortThreshold(68);
+    setMinConfidence(70);
+    setMaxAllocationPerStock(15000);
+    setProductType('MIS');
+    setAllowShorts(true);
+    setIntervalSec(20);
+    setCountdown(20);
+    setCustomUniverse(WHOLE_MARKET_UNIVERSE);
+    localStorage.removeItem('tradesphere_whole_market_config');
+    toast.info('Agent Reset to Defaults');
+  };
+
+  // Apply a Strategy Preset
+  const handleApplyPreset = (preset: StrategyPreset) => {
+    setActivePresetId(preset.id);
+    const cfg = preset.config;
+    if (cfg.systemPrompt) setSystemPrompt(cfg.systemPrompt);
+    if (cfg.decisionRules) setDecisionRules(cfg.decisionRules);
+    if (typeof cfg.takeProfitPercent === 'number') setTakeProfitPercent(cfg.takeProfitPercent);
+    if (typeof cfg.stopLossPercent === 'number') setStopLossPercent(cfg.stopLossPercent);
+    if (typeof cfg.rsiBuyThreshold === 'number') setRsiBuyThreshold(cfg.rsiBuyThreshold);
+    if (typeof cfg.rsiShortThreshold === 'number') setRsiShortThreshold(cfg.rsiShortThreshold);
+    if (typeof cfg.minConfidence === 'number') setMinConfidence(cfg.minConfidence);
+    if (typeof cfg.maxAllocationPerStock === 'number') setMaxAllocationPerStock(cfg.maxAllocationPerStock);
+    if (cfg.productType) setProductType(cfg.productType);
+    if (typeof cfg.allowShorts === 'boolean') setAllowShorts(cfg.allowShorts);
+    if (typeof cfg.intervalSec === 'number') {
+      setIntervalSec(cfg.intervalSec);
+      setCountdown(cfg.intervalSec);
+    }
+    toast.success(`Preset Applied: ${preset.name}`, {
+      description: preset.description,
+    });
+  };
+
+  // Toggle scrip in custom universe
+  const handleToggleTicker = (sym: string) => {
+    if (customUniverse.includes(sym)) {
+      if (customUniverse.length <= 1) {
+        toast.error('At least 1 stock must remain in the universe.');
+        return;
+      }
+      setCustomUniverse((prev) => prev.filter((s) => s !== sym));
+    } else {
+      setCustomUniverse((prev) => [...prev, sym]);
+    }
+  };
+
+  // Add custom ticker
+  const handleAddCustomTicker = () => {
+    const sym = newTickerInput.trim().toUpperCase();
+    if (!sym) return;
+    if (customUniverse.includes(sym)) {
+      toast.info(`${sym} is already in the universe.`);
+      setNewTickerInput('');
+      return;
+    }
+    setCustomUniverse((prev) => [...prev, sym]);
+    setNewTickerInput('');
+    toast.success(`Added ${sym} to Agent Universe`);
   };
 
   const executeMarketCycle = async () => {
@@ -82,10 +356,23 @@ export function WholeMarketDesk({
         body: JSON.stringify({
           systemPrompt,
           decisionRules,
+          takeProfitPercent,
+          stopLossPercent,
+          rsiBuyThreshold,
+          rsiShortThreshold,
+          minConfidence,
+          maxAllocationPerStock,
+          productType,
           allowShorts,
-          universe: getActiveUniverse(),
-          maxAllocationPerStock: 15000,
-          productType: 'MIS',
+          universe: customUniverse,
+          llmConfig: {
+            enabled: enableLLM,
+            provider: llmProvider,
+            model: llmModel,
+            apiKey: llmApiKey,
+            ollamaBaseUrl,
+            temperature,
+          },
         }),
       });
 
@@ -98,8 +385,8 @@ export function WholeMarketDesk({
           soundManager.playOrderSuccess();
           confetti({ particleCount: 50, spread: 70, origin: { y: 0.6 } });
           setExecutionLogs((prev) => [...data.executions, ...prev].slice(0, 40));
-          toast.success(`Autonomous Whole-Market Action`, {
-            description: `Executed ${data.executions.length} orders across the market.`,
+          toast.success(`Autonomous Quant Execution`, {
+            description: `Executed ${data.executions.length} orders across the customized universe.`,
           });
           if (onTradeExecuted) onTradeExecuted();
         }
@@ -116,13 +403,14 @@ export function WholeMarketDesk({
     setCycleCount(1);
     setCountdown(intervalSec);
     toast.success('Whole-Market Autonomous Desk Started!', {
-      description: `Continuously sweeping ${getActiveUniverse().length} stocks every ${intervalSec}s. Buying dips, shorting peaks, taking profits.`,
+      description: `Continuously sweeping ${customUniverse.length} stocks every ${intervalSec}s with your custom parameters.`,
     });
 
     // Execute first cycle immediately
     executeMarketCycle();
 
     // Start recurring interval
+    if (runnerTimerRef.current) clearInterval(runnerTimerRef.current);
     runnerTimerRef.current = setInterval(() => {
       setCycleCount((prev) => prev + 1);
       setCountdown(intervalSec);
@@ -130,6 +418,7 @@ export function WholeMarketDesk({
     }, intervalSec * 1000);
 
     // 1-second countdown display
+    if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
     countdownTimerRef.current = setInterval(() => {
       setCountdown((prev) => (prev > 1 ? prev - 1 : intervalSec));
     }, 1000);
@@ -140,7 +429,7 @@ export function WholeMarketDesk({
     if (runnerTimerRef.current) clearInterval(runnerTimerRef.current);
     if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
     toast.info('Whole-Market Desk Paused', {
-      description: 'Continuous trading loop stopped. Open positions remain active in portfolio.',
+      description: 'Continuous trading loop stopped. Active positions remain in your portfolio ledger.',
     });
   };
 
@@ -160,50 +449,663 @@ export function WholeMarketDesk({
             <h3 className="text-xl sm:text-2xl font-black text-white tracking-tight flex items-center gap-2">
               Autonomous Whole-Market Quant Desk
               <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">
-                FULL-DAY AUTOPILOT
+                CUSTOMIZABLE AUTOPILOT
               </span>
             </h3>
           </div>
           <p className="text-xs sm:text-sm text-slate-400 max-w-2xl leading-relaxed">
-            Unlike single-stock bots, this agent operates across the entire equity universe simultaneously.
-            It scans technical confluences, buys oversold dips, short sells overbought exhaustions (MIS 5x), and locks in target profits.
+            Operates across the entire equity universe simultaneously. Tailor the System Prompt, technical indicator bounds,
+            stop-loss/take-profit targets, leverage, and monitored tickers to your exact quantitative trading strategy.
           </p>
         </div>
 
-        {/* Start / Stop Main Buttons */}
+        {/* Start / Stop & Sweep Buttons */}
         <div className="flex flex-wrap items-center gap-3">
           {isRunning ? (
             <button
               onClick={stopWholeMarketRunner}
-              className="py-4 px-6 rounded-2xl bg-rose-600 hover:bg-rose-500 text-white font-black font-mono text-xs uppercase tracking-wider shadow-xl shadow-rose-600/30 active:scale-95 transition-all flex items-center gap-2.5"
+              className="py-3.5 px-6 rounded-2xl bg-rose-600 hover:bg-rose-500 text-white font-black font-mono text-xs uppercase tracking-wider shadow-xl shadow-rose-600/30 active:scale-95 transition-all flex items-center gap-2.5"
             >
               <Square className="w-4 h-4 fill-white" />
-              <span>Stop Whole-Market Desk</span>
+              <span>Stop Quant Desk</span>
             </button>
           ) : (
             <button
               onClick={startWholeMarketRunner}
-              className="py-4 px-6 rounded-2xl bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-600 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black font-mono text-xs uppercase tracking-wider shadow-xl shadow-emerald-500/30 active:scale-95 transition-all flex items-center gap-2.5"
+              className="py-3.5 px-6 rounded-2xl bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-600 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black font-mono text-xs uppercase tracking-wider shadow-xl shadow-emerald-500/30 active:scale-95 transition-all flex items-center gap-2.5"
             >
               <Play className="w-5 h-5 fill-slate-950" />
-              <span>Start Whole-Market Agent (Full Day)</span>
+              <span>Start Agent (Full Day)</span>
             </button>
           )}
 
           <button
             onClick={executeMarketCycle}
             disabled={isScanning}
-            className="py-4 px-5 rounded-2xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 font-bold font-mono text-xs transition-all flex items-center gap-2 disabled:opacity-50"
+            className="py-3.5 px-4 rounded-2xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 font-bold font-mono text-xs transition-all flex items-center gap-2 disabled:opacity-50"
             title="Perform a single sweep across all stocks right now"
           >
             <Zap className="w-4 h-4 text-yellow-400" />
-            <span>{isScanning ? 'Sweeping Market...' : 'Sweep Market Once'}</span>
+            <span>{isScanning ? 'Sweeping...' : 'Sweep Once'}</span>
+          </button>
+
+          <button
+            onClick={() => setIsCustomizing((prev) => !prev)}
+            className={`py-3.5 px-4 rounded-2xl border font-bold font-mono text-xs transition-all flex items-center gap-2 ${
+              isCustomizing
+                ? 'bg-blue-600 text-white border-blue-500 shadow-lg shadow-blue-600/20'
+                : 'bg-slate-900/80 hover:bg-slate-800 border-slate-700 text-blue-400 hover:text-blue-300'
+            }`}
+          >
+            <SlidersHorizontal className="w-4 h-4" />
+            <span>Customize Strategy</span>
+            {isCustomizing ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
           </button>
         </div>
       </div>
 
+      {/* Active Strategy Telemetry Pill */}
+      <div className="py-3.5 px-4 my-4 rounded-2xl bg-slate-950/80 border border-slate-800/80 flex flex-wrap items-center justify-between gap-3 text-xs font-mono relative z-10">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-[10px] text-slate-500 uppercase font-bold">Active Configuration:</span>
+          <span className="px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20 font-bold">
+            TP: +{takeProfitPercent}%
+          </span>
+          <span className="px-2 py-0.5 rounded bg-rose-500/10 text-rose-400 border border-rose-500/20 font-bold">
+            SL: -{stopLossPercent}%
+          </span>
+          <span className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+            RSI Buy: &le;{rsiBuyThreshold}
+          </span>
+          <span className="px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">
+            RSI Short: &ge;{rsiShortThreshold}
+          </span>
+          <span className="px-2 py-0.5 rounded bg-purple-500/10 text-purple-400 border border-purple-500/20">
+            Min Conviction: {minConfidence}%
+          </span>
+          <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-300">
+            Max/Scrip: ₹{maxAllocationPerStock.toLocaleString('en-IN')}
+          </span>
+          <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-300">
+            {productType} {productType === 'MIS' ? '(5x Margin)' : '(1x Cash)'}
+          </span>
+          <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-300">
+            {customUniverse.length} Scrips
+          </span>
+          <span className={`px-2 py-0.5 rounded font-bold border ${
+            enableLLM
+              ? 'bg-purple-500/10 text-purple-400 border-purple-500/30'
+              : 'bg-slate-800 text-slate-500 border-slate-700'
+          }`}>
+            🧠 LLM: {enableLLM ? `${llmProvider.toUpperCase()}` : 'DISABLED'}
+          </span>
+        </div>
+
+        <button
+          onClick={() => setIsCustomizing((prev) => !prev)}
+          className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1 font-semibold underline underline-offset-4"
+        >
+          <span>{isCustomizing ? 'Hide Customizer' : 'Edit Strategy & LLMs'}</span>
+        </button>
+      </div>
+
+      {/* ============================================================== */}
+      {/* EXPANDABLE CUSTOMIZATION SUITE                                  */}
+      {/* ============================================================== */}
+      {isCustomizing && (
+        <div className="mb-6 p-6 rounded-3xl bg-slate-900/90 border border-blue-500/40 shadow-2xl relative z-20 space-y-6 animate-in fade-in slide-in-from-top-4 duration-200">
+          {/* Multi-LLM Quant Engine & Model Architecture Section */}
+          <div className="p-4 rounded-2xl bg-slate-950/80 border border-purple-500/30">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 mb-4 border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <div className="p-1.5 rounded-lg bg-purple-500/20 text-purple-400">
+                  <Bot className="w-4 h-4" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-white">
+                    Multi-LLM Autonomous Quant Intelligence Engine
+                  </h4>
+                  <p className="text-[11px] text-slate-400">
+                    Powers market synthesis, CIO liquidity sweeps, and trade conviction with your chosen LLM.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-mono text-slate-400">LLM Synthesis:</span>
+                <button
+                  onClick={() => setEnableLLM((prev) => !prev)}
+                  className={`px-3 py-1 rounded-xl text-xs font-bold font-mono transition-all ${
+                    enableLLM
+                      ? 'bg-purple-600 text-white shadow-md shadow-purple-600/30'
+                      : 'bg-slate-800 text-slate-400 border border-slate-700'
+                  }`}
+                >
+                  {enableLLM ? 'ENABLED (ACTIVE CIO)' : 'DISABLED'}
+                </button>
+              </div>
+            </div>
+
+            {enableLLM && (
+              <div className="space-y-4">
+                {/* Provider Selector Tabs */}
+                <div>
+                  <div className="text-[11px] font-mono text-slate-400 mb-2 uppercase font-semibold">
+                    Select AI Provider
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+                    {LLM_PROVIDERS.map((prov) => {
+                      const isSelected = llmProvider === prov.id;
+                      return (
+                        <button
+                          key={prov.id}
+                          onClick={() => handleSelectProvider(prov.id)}
+                          className={`p-3 rounded-xl border text-left transition-all ${
+                            isSelected
+                              ? 'bg-purple-600/20 border-purple-500 text-white shadow-md shadow-purple-500/10'
+                              : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="text-base">{prov.icon}</span>
+                            <span className="text-xs font-bold">{prov.name.split(' ')[0]}</span>
+                          </div>
+                          <div className="text-[10px] text-slate-400 truncate">
+                            {prov.models[0]?.name.split(' ')[0]}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Model & Connection Settings */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 pt-2">
+                  {/* Model Selector */}
+                  <div>
+                    <label className="text-[11px] font-mono text-slate-400 mb-1 block uppercase font-semibold">
+                      Model Selection
+                    </label>
+                    <select
+                      value={llmModel}
+                      onChange={(e) => setLlmModel(e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-purple-500"
+                    >
+                      {LLM_PROVIDERS.find((p) => p.id === llmProvider)?.models.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* API Key or Ollama URL */}
+                  {llmProvider === 'ollama' ? (
+                    <div>
+                      <label className="text-[11px] font-mono text-slate-400 mb-1 block uppercase font-semibold">
+                        Ollama Base URL
+                      </label>
+                      <input
+                        type="text"
+                        value={ollamaBaseUrl}
+                        onChange={(e) => setOllamaBaseUrl(e.target.value)}
+                        placeholder="http://localhost:11434"
+                        className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white font-mono focus:outline-none focus:border-purple-500"
+                      />
+                    </div>
+                  ) : (
+                    <div>
+                      <label className="text-[11px] font-mono text-slate-400 mb-1 flex items-center justify-between uppercase font-semibold">
+                        <span>API Key ({llmProvider.toUpperCase()})</span>
+                        <button
+                          type="button"
+                          onClick={() => setShowApiKey((prev) => !prev)}
+                          className="text-purple-400 hover:text-purple-300 text-[10px]"
+                        >
+                          {showApiKey ? 'Hide' : 'Show'}
+                        </button>
+                      </label>
+                      <div className="relative">
+                        <Key className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                        <input
+                          type={showApiKey ? 'text' : 'password'}
+                          value={llmApiKey}
+                          onChange={(e) => setLlmApiKey(e.target.value)}
+                          placeholder={`Enter ${llmProvider.toUpperCase()} API key...`}
+                          className="w-full pl-9 pr-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white font-mono focus:outline-none focus:border-purple-500"
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Temperature */}
+                  <div>
+                    <div className="flex justify-between text-[11px] font-mono text-slate-400 mb-1 uppercase font-semibold">
+                      <span>Reasoning Temperature</span>
+                      <span className="text-purple-400 font-bold">{temperature.toFixed(2)}</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0.0"
+                      max="1.0"
+                      step="0.05"
+                      value={temperature}
+                      onChange={(e) => setTemperature(parseFloat(e.target.value))}
+                      className="w-full accent-purple-500 h-1.5 bg-slate-800 rounded-lg cursor-pointer mt-2"
+                    />
+                    <div className="flex justify-between text-[9px] text-slate-600 font-mono mt-1">
+                      <span>0.0 (Deterministic)</span>
+                      <span>1.0 (Creative)</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+          {/* Preset Strategy Cards */}
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-amber-400" />
+                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-200">
+                  Quantitative Strategy Presets (1-Click Setup)
+                </h4>
+              </div>
+              <span className="text-[11px] text-slate-400 font-mono">Select a pre-tuned strategy or customize below</span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              {STRATEGY_PRESETS.map((preset) => {
+                const isActive = activePresetId === preset.id;
+                return (
+                  <button
+                    key={preset.id}
+                    onClick={() => handleApplyPreset(preset)}
+                    className={`p-3.5 rounded-2xl text-left transition-all border ${
+                      isActive
+                        ? 'bg-blue-600/20 border-blue-500 text-white shadow-lg shadow-blue-500/10'
+                        : 'bg-slate-950/60 border-slate-800 hover:border-slate-700 text-slate-300'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="font-bold text-xs text-white">{preset.name}</span>
+                      <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300">
+                        {preset.badge}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 leading-snug line-clamp-2">
+                      {preset.description}
+                    </p>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Prompts & Natural Language Strategy Rules */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div>
+              <label className="text-xs font-bold text-slate-300 mb-1.5 flex items-center justify-between">
+                <span>Custom System Prompt (AI Quantitative Thesis)</span>
+                <span className="text-[10px] text-slate-500 font-mono">{systemPrompt.length} chars</span>
+              </label>
+              <textarea
+                value={systemPrompt}
+                onChange={(e) => {
+                  setSystemPrompt(e.target.value);
+                  setActivePresetId('custom');
+                }}
+                rows={4}
+                className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-200 font-mono focus:outline-none focus:border-blue-500 transition-colors resize-none leading-relaxed"
+                placeholder="Enter system prompt instructions for the autonomous market scanner..."
+              />
+            </div>
+
+            <div>
+              <label className="text-xs font-bold text-slate-300 mb-1.5 flex items-center justify-between">
+                <span>Quantitative Decision Rules &amp; Execution Matrix</span>
+                <span className="text-[10px] text-slate-500 font-mono">Confluence Logic</span>
+              </label>
+              <textarea
+                value={decisionRules}
+                onChange={(e) => {
+                  setDecisionRules(e.target.value);
+                  setActivePresetId('custom');
+                }}
+                rows={4}
+                className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-200 font-mono focus:outline-none focus:border-blue-500 transition-colors resize-none leading-relaxed"
+                placeholder="1. Buy on oversold RSI dip...\n2. Short on exhaustion...\n3. Take profit..."
+              />
+            </div>
+          </div>
+
+          {/* Numerical Threshold Sliders & Risk Guardrails */}
+          <div>
+            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-300 mb-3 flex items-center gap-2">
+              <Shield className="w-4 h-4 text-emerald-400" />
+              <span>Risk Guardrails &amp; Indicator Threshold Controls</span>
+            </h4>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 bg-slate-950/70 p-4 rounded-2xl border border-slate-800/80">
+              {/* Take Profit */}
+              <div>
+                <div className="flex justify-between text-xs font-mono text-slate-400 mb-1">
+                  <span>Take Profit Target</span>
+                  <span className="text-emerald-400 font-bold">+{takeProfitPercent}%</span>
+                </div>
+                <input
+                  type="range"
+                  min="0.5"
+                  max="8.0"
+                  step="0.1"
+                  value={takeProfitPercent}
+                  onChange={(e) => {
+                    setTakeProfitPercent(parseFloat(e.target.value));
+                    setActivePresetId('custom');
+                  }}
+                  className="w-full accent-emerald-500 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
+                />
+                <div className="flex justify-between text-[9px] text-slate-600 font-mono mt-1">
+                  <span>0.5% (Scalp)</span>
+                  <span>8.0% (Swing)</span>
+                </div>
+              </div>
+
+              {/* Stop Loss */}
+              <div>
+                <div className="flex justify-between text-xs font-mono text-slate-400 mb-1">
+                  <span>Stop Loss Threshold</span>
+                  <span className="text-rose-400 font-bold">-{stopLossPercent}%</span>
+                </div>
+                <input
+                  type="range"
+                  min="0.5"
+                  max="4.0"
+                  step="0.1"
+                  value={stopLossPercent}
+                  onChange={(e) => {
+                    setStopLossPercent(parseFloat(e.target.value));
+                    setActivePresetId('custom');
+                  }}
+                  className="w-full accent-rose-500 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
+                />
+                <div className="flex justify-between text-[9px] text-slate-600 font-mono mt-1">
+                  <span>-0.5% (Tight)</span>
+                  <span>-4.0% (Wide)</span>
+                </div>
+              </div>
+
+              {/* RSI Oversold Buy Level */}
+              <div>
+                <div className="flex justify-between text-xs font-mono text-slate-400 mb-1">
+                  <span>RSI Buy Threshold (Dip)</span>
+                  <span className="text-blue-400 font-bold">&le; {rsiBuyThreshold}</span>
+                </div>
+                <input
+                  type="range"
+                  min="20"
+                  max="50"
+                  step="1"
+                  value={rsiBuyThreshold}
+                  onChange={(e) => {
+                    setRsiBuyThreshold(parseInt(e.target.value));
+                    setActivePresetId('custom');
+                  }}
+                  className="w-full accent-blue-500 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
+                />
+                <div className="flex justify-between text-[9px] text-slate-600 font-mono mt-1">
+                  <span>20 (Panic Dip)</span>
+                  <span>50 (Mild Pullback)</span>
+                </div>
+              </div>
+
+              {/* RSI Overbought Short Level */}
+              <div>
+                <div className="flex justify-between text-xs font-mono text-slate-400 mb-1">
+                  <span>RSI Short Threshold (Peak)</span>
+                  <span className="text-amber-400 font-bold">&ge; {rsiShortThreshold}</span>
+                </div>
+                <input
+                  type="range"
+                  min="55"
+                  max="85"
+                  step="1"
+                  value={rsiShortThreshold}
+                  onChange={(e) => {
+                    setRsiShortThreshold(parseInt(e.target.value));
+                    setActivePresetId('custom');
+                  }}
+                  className="w-full accent-amber-500 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
+                />
+                <div className="flex justify-between text-[9px] text-slate-600 font-mono mt-1">
+                  <span>55 (Early Peak)</span>
+                  <span>85 (Extreme Mania)</span>
+                </div>
+              </div>
+
+              {/* Max Allocation Per Stock */}
+              <div>
+                <div className="flex justify-between text-xs font-mono text-slate-400 mb-1">
+                  <span>Max Allocation / Stock</span>
+                  <span className="text-white font-bold">₹{maxAllocationPerStock.toLocaleString('en-IN')}</span>
+                </div>
+                <input
+                  type="range"
+                  min="2000"
+                  max="50000"
+                  step="1000"
+                  value={maxAllocationPerStock}
+                  onChange={(e) => {
+                    setMaxAllocationPerStock(parseInt(e.target.value));
+                    setActivePresetId('custom');
+                  }}
+                  className="w-full accent-emerald-500 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
+                />
+                <div className="flex justify-between text-[9px] text-slate-600 font-mono mt-1">
+                  <span>₹2,000</span>
+                  <span>₹50,000</span>
+                </div>
+              </div>
+
+              {/* Minimum Conviction / Confidence */}
+              <div>
+                <div className="flex justify-between text-xs font-mono text-slate-400 mb-1">
+                  <span>Min Agent Conviction</span>
+                  <span className="text-purple-400 font-bold">&ge; {minConfidence}%</span>
+                </div>
+                <input
+                  type="range"
+                  min="50"
+                  max="95"
+                  step="5"
+                  value={minConfidence}
+                  onChange={(e) => {
+                    setMinConfidence(parseInt(e.target.value));
+                    setActivePresetId('custom');
+                  }}
+                  className="w-full accent-purple-500 h-1.5 bg-slate-800 rounded-lg cursor-pointer"
+                />
+                <div className="flex justify-between text-[9px] text-slate-600 font-mono mt-1">
+                  <span>50% (High Action)</span>
+                  <span>95% (High Conviction)</span>
+                </div>
+              </div>
+
+              {/* Product Type (MIS vs CNC) */}
+              <div>
+                <div className="text-xs font-mono text-slate-400 mb-1.5">Execution Product Type</div>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => {
+                      setProductType('MIS');
+                      setActivePresetId('custom');
+                    }}
+                    className={`py-1.5 px-2 rounded-lg text-xs font-bold transition-all ${
+                      productType === 'MIS'
+                        ? 'bg-blue-600 text-white shadow-md shadow-blue-600/20'
+                        : 'bg-slate-900 text-slate-400 border border-slate-800'
+                    }`}
+                  >
+                    MIS (5x Margin)
+                  </button>
+                  <button
+                    onClick={() => {
+                      setProductType('CNC');
+                      setActivePresetId('custom');
+                    }}
+                    className={`py-1.5 px-2 rounded-lg text-xs font-bold transition-all ${
+                      productType === 'CNC'
+                        ? 'bg-blue-600 text-white shadow-md shadow-blue-600/20'
+                        : 'bg-slate-900 text-slate-400 border border-slate-800'
+                    }`}
+                  >
+                    CNC (1x Delivery)
+                  </button>
+                </div>
+              </div>
+
+              {/* Sweep Interval */}
+              <div>
+                <div className="text-xs font-mono text-slate-400 mb-1.5">Sweep Loop Cadence</div>
+                <select
+                  value={intervalSec}
+                  onChange={(e) => {
+                    const sec = Number(e.target.value);
+                    setIntervalSec(sec);
+                    setCountdown(sec);
+                    setActivePresetId('custom');
+                  }}
+                  className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-slate-200 text-xs focus:outline-none focus:border-blue-500 font-mono"
+                >
+                  <option value={10}>10 Seconds (Ultra-Fast Scalper)</option>
+                  <option value={15}>15 Seconds (High Frequency)</option>
+                  <option value={20}>20 Seconds (Standard Balance)</option>
+                  <option value={30}>30 Seconds (Conservative)</option>
+                  <option value={60}>60 Seconds (Full-Day Swing)</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {/* Universe Scrip Multi-Select & Custom Ticker Input */}
+          <div>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
+              <div>
+                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-2">
+                  <Globe2 className="w-4 h-4 text-blue-400" />
+                  <span>Monitored Ticker Universe ({customUniverse.length} Active Scrips)</span>
+                </h4>
+                <p className="text-[11px] text-slate-400">Click any stock to toggle inclusion. Add custom ticker symbols below.</p>
+              </div>
+
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  onClick={() => setCustomUniverse(WHOLE_MARKET_UNIVERSE)}
+                  className="px-2.5 py-1 rounded-lg text-[10px] font-mono font-bold bg-slate-800 hover:bg-slate-700 text-slate-300"
+                >
+                  Select All 20
+                </button>
+                <button
+                  onClick={() => setCustomUniverse(WHOLE_MARKET_UNIVERSE.filter((s) => s.endsWith('.NS')))}
+                  className="px-2.5 py-1 rounded-lg text-[10px] font-mono font-bold bg-slate-800 hover:bg-slate-700 text-slate-300"
+                >
+                  NSE India Only (16)
+                </button>
+                <button
+                  onClick={() => setCustomUniverse(WHOLE_MARKET_UNIVERSE.filter((s) => !s.endsWith('.NS')))}
+                  className="px-2.5 py-1 rounded-lg text-[10px] font-mono font-bold bg-slate-800 hover:bg-slate-700 text-slate-300"
+                >
+                  NASDAQ Only (4)
+                </button>
+              </div>
+            </div>
+
+            {/* Ticker pills */}
+            <div className="flex flex-wrap gap-2 p-3.5 bg-slate-950/80 rounded-2xl border border-slate-800 max-h-36 overflow-y-auto scrollbar-none">
+              {WHOLE_MARKET_UNIVERSE.map((sym) => {
+                const isSelected = customUniverse.includes(sym);
+                return (
+                  <button
+                    key={sym}
+                    onClick={() => handleToggleTicker(sym)}
+                    className={`px-2.5 py-1 rounded-xl text-xs font-mono font-bold flex items-center gap-1.5 transition-all ${
+                      isSelected
+                        ? 'bg-blue-600/30 text-blue-300 border border-blue-500/50 shadow-sm'
+                        : 'bg-slate-900 text-slate-500 border border-slate-800 hover:text-slate-300'
+                    }`}
+                  >
+                    <span>{sym}</span>
+                    {isSelected ? <Check className="w-3 h-3 text-blue-400" /> : <Plus className="w-3 h-3 text-slate-600" />}
+                  </button>
+                );
+              })}
+
+              {/* Any additional custom tickers added by user */}
+              {customUniverse
+                .filter((s) => !WHOLE_MARKET_UNIVERSE.includes(s))
+                .map((sym) => (
+                  <button
+                    key={sym}
+                    onClick={() => handleToggleTicker(sym)}
+                    className="px-2.5 py-1 rounded-xl text-xs font-mono font-bold flex items-center gap-1.5 bg-emerald-600/30 text-emerald-300 border border-emerald-500/50 shadow-sm"
+                  >
+                    <span>{sym} (Custom)</span>
+                    <X className="w-3 h-3 text-emerald-400" />
+                  </button>
+                ))}
+            </div>
+
+            {/* Add Custom Ticker Input */}
+            <div className="flex items-center gap-2 mt-3 max-w-md">
+              <input
+                type="text"
+                placeholder="Add custom scrip (e.g. WIPRO.NS or GOOGL)..."
+                value={newTickerInput}
+                onChange={(e) => setNewTickerInput(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleAddCustomTicker()}
+                className="flex-1 px-3 py-1.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-200 font-mono focus:outline-none focus:border-blue-500 uppercase placeholder:normal-case"
+              />
+              <button
+                onClick={handleAddCustomTicker}
+                className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold font-mono transition-all flex items-center gap-1"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Add</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Action Footer: Save & Reset */}
+          <div className="flex items-center justify-between pt-4 border-t border-slate-800/80">
+            <button
+              onClick={handleResetDefaults}
+              className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white text-xs font-mono font-bold transition-all flex items-center gap-1.5"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>Reset to Defaults</span>
+            </button>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setIsCustomizing(false)}
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-mono font-bold transition-all"
+              >
+                Close Drawer
+              </button>
+              <button
+                onClick={handleSaveConfig}
+                className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-mono font-black uppercase tracking-wider transition-all shadow-lg shadow-emerald-600/20 flex items-center gap-2"
+              >
+                <Save className="w-3.5 h-3.5" />
+                <span>Save Strategy</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Configuration & Status Ribbon */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 py-5 border-b border-slate-800 text-xs font-mono relative z-10">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5 py-5 border-b border-slate-800 text-xs font-mono relative z-10">
         {/* Runner Status */}
         <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-slate-800 flex items-center justify-between">
           <div>
@@ -227,31 +1129,39 @@ export function WholeMarketDesk({
           )}
         </div>
 
-        {/* Universe Scope */}
-        <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-slate-800">
-          <div className="text-[10px] text-slate-400 uppercase font-semibold mb-1">Monitored Universe</div>
-          <div className="flex items-center gap-1.5">
-            <button
-              onClick={() => setUniverseMode('ALL')}
-              className={`px-2 py-0.5 rounded text-[11px] font-bold ${
-                universeMode === 'ALL'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-slate-800 text-slate-400 hover:text-white'
-              }`}
-            >
-              All 20 Stocks
-            </button>
-            <button
-              onClick={() => setUniverseMode('INDIAN')}
-              className={`px-2 py-0.5 rounded text-[11px] font-bold ${
-                universeMode === 'INDIAN'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-slate-800 text-slate-400 hover:text-white'
-              }`}
-            >
-              16 Indian Bluechips
-            </button>
+        {/* AI LLM Engine Status */}
+        <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-slate-800 flex items-center justify-between">
+          <div>
+            <div className="text-[10px] text-slate-400 uppercase font-semibold mb-0.5 flex items-center gap-1">
+              <Bot className="w-3 h-3 text-purple-400" />
+              <span>LLM Engine</span>
+            </div>
+            <div className="text-xs font-bold text-slate-200 truncate max-w-[130px]">
+              {enableLLM ? `${llmProvider.toUpperCase()}` : 'HEURISTIC'}
+            </div>
           </div>
+          <button
+            onClick={() => setIsCustomizing(true)}
+            className="text-[10px] font-bold text-purple-400 hover:underline"
+          >
+            {enableLLM ? llmModel.split('-')[0] : 'Enable &rarr;'}
+          </button>
+        </div>
+
+        {/* Universe Scope */}
+        <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-slate-800 flex items-center justify-between">
+          <div>
+            <div className="text-[10px] text-slate-400 uppercase font-semibold mb-0.5">Universe Scope</div>
+            <div className="text-xs font-bold text-slate-200">
+              {customUniverse.length} Scrips Active
+            </div>
+          </div>
+          <button
+            onClick={() => setIsCustomizing(true)}
+            className="text-[10px] font-bold text-blue-400 hover:underline"
+          >
+            Edit &rarr;
+          </button>
         </div>
 
         {/* Short Selling Toggle */}
@@ -259,7 +1169,7 @@ export function WholeMarketDesk({
           <div>
             <div className="text-[10px] text-slate-400 uppercase font-semibold">Intraday Shorting</div>
             <div className="text-xs font-bold text-slate-200 mt-0.5">
-              {allowShorts ? 'ENABLED (MIS 5x)' : 'DISABLED'}
+              {allowShorts ? `ON (${productType})` : 'LONG-ONLY'}
             </div>
           </div>
           <button
@@ -278,19 +1188,85 @@ export function WholeMarketDesk({
 
         {/* Sweep Interval */}
         <div className="p-3.5 rounded-2xl bg-slate-900/80 border border-slate-800">
-          <div className="text-[10px] text-slate-400 uppercase font-semibold mb-1">Sweep Frequency</div>
+          <div className="text-[10px] text-slate-400 uppercase font-semibold mb-1">Sweep Cadence</div>
           <select
             value={intervalSec}
-            onChange={(e) => setIntervalSec(Number(e.target.value))}
-            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-slate-200 text-xs focus:outline-none focus:border-blue-500"
+            onChange={(e) => {
+              const sec = Number(e.target.value);
+              setIntervalSec(sec);
+              setCountdown(sec);
+            }}
+            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2 py-1 text-slate-200 text-xs focus:outline-none focus:border-blue-500 font-mono"
           >
-            <option value={15}>15 Seconds (High Frequency)</option>
-            <option value={20}>20 Seconds (Recommended)</option>
-            <option value={30}>30 Seconds</option>
-            <option value={60}>1 Minute (Full-Day Pace)</option>
+            <option value={10}>10s (Ultra-Fast)</option>
+            <option value={15}>15s (High Frequency)</option>
+            <option value={20}>20s (Recommended)</option>
+            <option value={30}>30s (Conservative)</option>
+            <option value={60}>60s (Full-Day)</option>
           </select>
         </div>
       </div>
+
+      {/* Real-time LLM Quantitative CIO Thesis & Market Synthesis Card */}
+      {scanResult?.llmThesis && (
+        <div className="mt-6 p-5 rounded-3xl bg-gradient-to-r from-purple-950/40 via-slate-950 to-blue-950/40 border border-purple-500/30 relative overflow-hidden shadow-2xl relative z-10">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 mb-3 border-b border-slate-800/80">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 rounded-xl bg-purple-500/20 text-purple-400 border border-purple-500/30">
+                <Bot className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h4 className="font-extrabold text-sm text-white tracking-tight">AI Quantitative CIO Thesis</h4>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30 uppercase font-bold">
+                    {scanResult.llmThesis.provider} · {scanResult.llmThesis.model}
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400 font-mono">
+                  Autonomous Multi-LLM Market Synthesis &amp; Trade Endorsement
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 font-mono">
+              <span
+                className={`px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider ${
+                  scanResult.llmThesis.sentiment === 'BULLISH'
+                    ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                    : scanResult.llmThesis.sentiment === 'BEARISH'
+                    ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
+                    : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                }`}
+              >
+                {scanResult.llmThesis.sentiment} OUTLOOK
+              </span>
+              {scanResult.llmThesis.latencyMs && (
+                <span className="text-[10px] text-slate-500 font-bold">
+                  {scanResult.llmThesis.latencyMs}ms
+                </span>
+              )}
+            </div>
+          </div>
+
+          <p className="text-xs sm:text-sm text-slate-200 leading-relaxed font-sans mb-3 italic">
+            &ldquo;{scanResult.llmThesis.commentary}&rdquo;
+          </p>
+
+          {scanResult.llmThesis.highConvictionPicks?.length > 0 && (
+            <div className="flex items-center gap-2 flex-wrap text-xs font-mono pt-2 border-t border-slate-900">
+              <span className="text-[10px] text-purple-300 font-bold uppercase">High-Conviction Scrips:</span>
+              {scanResult.llmThesis.highConvictionPicks.map((pick) => (
+                <span
+                  key={pick}
+                  className="px-2.5 py-0.5 rounded-lg bg-purple-600/30 text-purple-200 border border-purple-500/40 text-xs font-bold"
+                >
+                  {pick}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Main Two-Column View: Left (Signals Matrix) | Right (Execution Feed) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 pt-6 relative z-10">
@@ -300,7 +1276,7 @@ export function WholeMarketDesk({
             <div className="flex items-center gap-2">
               <Activity className="w-4 h-4 text-blue-400" />
               <h4 className="text-xs font-bold uppercase tracking-wider text-slate-300">
-                Universe Signals Matrix ({activeSignals.length > 0 ? activeSignals.length : getActiveUniverse().length} Stocks)
+                Universe Signals Matrix ({activeSignals.length > 0 ? activeSignals.length : customUniverse.length} Stocks)
               </h4>
             </div>
             {scanResult && (
@@ -313,7 +1289,7 @@ export function WholeMarketDesk({
           {activeSignals.length === 0 ? (
             <div className="py-16 text-center text-xs text-slate-400 font-mono">
               <Radio className="w-8 h-8 text-blue-400 mx-auto mb-2 animate-pulse" />
-              <div>Desk Standing By. Click &quot;Start Whole-Market Agent&quot; to sweep the universe.</div>
+              <div>Desk Standing By. Click &quot;Start Agent&quot; or &quot;Sweep Once&quot; to scan the universe.</div>
             </div>
           ) : (
             <div className="space-y-2 max-h-[460px] overflow-y-auto pr-1 scrollbar-none font-mono text-xs">
@@ -321,6 +1297,7 @@ export function WholeMarketDesk({
                 const isBuy = sig.signal === 'BUY';
                 const isShort = sig.signal === 'SHORT';
                 const isExit = sig.signal === 'SELL' || sig.signal === 'COVER';
+                const currency = sig.symbol.endsWith('.NS') ? '₹' : '$';
 
                 return (
                   <div
@@ -335,12 +1312,14 @@ export function WholeMarketDesk({
                         </span>
                       </div>
                       <div className="text-[11px] text-slate-400 flex items-center gap-2 mt-0.5">
-                        <span className="text-white font-bold">₹{sig.price.toFixed(2)}</span>
+                        <span className="text-white font-bold">{currency}{sig.price.toFixed(2)}</span>
                         <span className={sig.changePercent >= 0 ? 'text-emerald-400' : 'text-rose-400'}>
                           {sig.changePercent >= 0 ? '+' : ''}{sig.changePercent.toFixed(2)}%
                         </span>
                         <span>•</span>
                         <span>RSI: {sig.rsi}</span>
+                        <span>•</span>
+                        <span className="text-slate-500">Conv: {sig.confidence}%</span>
                       </div>
                     </div>
 
@@ -396,7 +1375,7 @@ export function WholeMarketDesk({
                 <Clock className="w-8 h-8 text-slate-600 mx-auto mb-2" />
                 <div>No trades triggered yet.</div>
                 <div className="text-[10px] text-slate-600 mt-1">
-                  The agent will record every Buy, Short, and Sell ticket here.
+                  The agent will record every executed Buy, Short, and Sell ticket here.
                 </div>
               </div>
             ) : (
@@ -405,6 +1384,7 @@ export function WholeMarketDesk({
                   const isBuy = item.action === 'BUY';
                   const isShort = item.action === 'SHORT';
                   const isExit = item.action === 'SELL' || item.action === 'COVER';
+                  const currency = item.symbol.endsWith('.NS') ? '₹' : '$';
 
                   return (
                     <div
@@ -421,18 +1401,18 @@ export function WholeMarketDesk({
                               : 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
                           }`}
                         >
-                          {item.action} (MIS 5x)
+                          {item.action} ({productType})
                         </span>
                         <span className="text-[10px] text-slate-500">{item.timestamp}</span>
                       </div>
 
                       <div className="font-bold text-white mb-1">
-                        {item.quantity}x {item.symbol} @ ₹{item.price.toFixed(2)}
+                        {item.quantity}x {item.symbol} @ {currency}{item.price.toFixed(2)}
                       </div>
 
                       <div className="text-[11px] text-slate-400 mb-1">
-                        Value: ₹{item.totalValue.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
-                        {item.marginUsed > 0 && ` • Margin: ₹${item.marginUsed.toFixed(2)}`}
+                        Value: {currency}{item.totalValue.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                        {item.marginUsed > 0 && ` • Margin: ${currency}${item.marginUsed.toFixed(2)}`}
                       </div>
 
                       {item.realizedPnL !== undefined && (
@@ -441,7 +1421,7 @@ export function WholeMarketDesk({
                             item.realizedPnL >= 0 ? 'text-emerald-400' : 'text-rose-400'
                           }`}
                         >
-                          Realized P&L: {item.realizedPnL >= 0 ? '+' : ''}₹{item.realizedPnL.toFixed(2)}
+                          Realized P&L: {item.realizedPnL >= 0 ? '+' : ''}{currency}{item.realizedPnL.toFixed(2)}
                         </div>
                       )}
 
