@@ -17,6 +17,7 @@ import {
   RotateCcw,
   TrendingDown,
   TrendingUp,
+  Bot,
 } from 'lucide-react';
 import { useRealtimeTrading } from '@/hooks/useRealtimeTrading';
 import { toast } from 'sonner';
@@ -37,6 +38,8 @@ interface Order {
   executedPrice?: number | null;
   executedAt?: string | null;
   realizedPnL?: number | null;
+  executedBy?: string | null;
+  reason?: string | null;
   createdAt: string;
 }
 
@@ -128,6 +131,8 @@ export default function OrdersPage() {
           createdAt: o.timestamp,
           executedAt: o.timestamp,
           realizedPnL: o.realizedPnL,
+          executedBy: o.executedBy,
+          reason: o.reason,
         }));
 
   const filteredOrders = effectiveOrders.filter((o) => {
@@ -330,9 +335,17 @@ export default function OrdersPage() {
                           >
                             {ord.stockSymbol}
                           </Link>
-                          <span className="block text-[10px] text-slate-400 font-normal">
-                            {ord.productType}
-                          </span>
+                          <div className="flex items-center gap-1.5 mt-0.5">
+                            <span className="text-[10px] text-slate-400 font-normal">
+                              {ord.productType}
+                            </span>
+                            {ord.executedBy && ord.executedBy.includes('AI') && (
+                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30 font-sans font-medium flex items-center gap-1">
+                                <Bot className="w-2.5 h-2.5 text-purple-400" />
+                                {ord.executedBy}
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td className="py-3.5 text-slate-300 font-semibold">{ord.orderType}</td>
                         <td className="py-3.5 text-right font-bold text-white">{ord.quantity}</td>

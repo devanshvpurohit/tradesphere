@@ -54,6 +54,7 @@ import {
   PRESET_AGENTS,
 } from '@/lib/agents/customAgent';
 import { WholeMarketDesk } from '@/components/agents/WholeMarketDesk';
+import { useRealtimeTrading } from '@/hooks/useRealtimeTrading';
 
 export default function AgentPlayground() {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -107,8 +108,22 @@ export default function AgentPlayground() {
   const [formTemperature, setFormTemperature] = useState(0.1);
   const [formMaxRisk, setFormMaxRisk] = useState(5);
 
+  // Realtime Cloud Firestore Trading Hook
+  const {
+    balance: realtimeBalance,
+    positions: realtimePositions,
+    executeClientTrade,
+    isConnected: isFirestoreConnected,
+  } = useRealtimeTrading();
+
   // User portfolio cash
-  const [portfolioBalance, setPortfolioBalance] = useState<number>(1000000);
+  const [portfolioBalance, setPortfolioBalance] = useState<number>(100000);
+
+  useEffect(() => {
+    if (typeof realtimeBalance === 'number' && realtimeBalance > 0) {
+      setPortfolioBalance(realtimeBalance);
+    }
+  }, [realtimeBalance]);
 
   // Autonomous Broker Mode & Email State
   const [autoPilotBroker, setAutoPilotBroker] = useState<boolean>(true);
@@ -387,23 +402,21 @@ Strictly return your final decision as a JSON object.`
   };
 
   // ==========================================
-  // RUN AGENT EVALUATION (LLM)
+  // RUN AGENT EVALUATION (LLM & QUANT ENGINE)
   // ==========================================
-  const handleRunAgentEvaluation = async () => {
+  const handleRunAgentEvaluation = async (overrideSymbol?: string) => {
     if (!activeAgent) return;
+    const targetSymbol = overrideSymbol || evalSymbol;
 
-    if (PROVIDER_METADATA[activeAgent.provider].requiresApiKey && !activeAgent.apiKey) {
-      toast.error(`API Key Missing for ${PROVIDER_METADATA[activeAgent.provider].name}`, {
-        description: 'Click the Settings icon on your agent to configure your personal API key.',
-      });
-      handleOpenEditModal(activeAgent);
-      return;
-    }
+    // Find holding details for exit evaluation
+    const holding = realtimePositions.find((p) => p.symbol === targetSymbol);
+    const holdingQty = holding ? Math.abs(holding.quantity) : 0;
+    const holdingAvgPrice = holding ? holding.avgPrice : 0;
 
     setEvaluating(true);
     setDecision(null);
 
-    toast.loading(`Consulting ${activeAgent.name} (${activeAgent.model})...`, {
+    toast.loading(`Consulting ${activeAgent.name} for ${targetSymbol}...`, {
       id: 'agent-eval',
     });
 
@@ -414,12 +427,15 @@ Strictly return your final decision as a JSON object.`
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           agent: activeAgent,
-          symbol: evalSymbol,
+          symbol: targetSymbol,
           autoExecute: autoPilotBroker,
           sendGmailAlert,
+          availableCash: realtimeBalance || portfolioBalance,
+          currentHoldingQuantity: holdingQty,
+          currentHoldingAvgPrice: holdingAvgPrice,
           portfolio: {
-            availableCash: portfolioBalance,
-            currentHoldingQuantity: 0,
+            availableCash: realtimeBalance || portfolioBalance,
+            currentHoldingQuantity: holdingQty,
           },
         }),
       });
@@ -441,7 +457,24 @@ Strictly return your final decision as a JSON object.`
             spread: 75,
             origin: { y: 0.6 },
           });
-          toast.success(`⚡ [Autonomous Broker Executed]: ${data.decision.action} ${evalSymbol}`, {
+
+          // Write directly to Cloud Firestore so portfolio and order book stream updates live
+          const td = data.tradeDetails;
+          if (td) {
+            await executeClientTrade({
+              symbol: td.symbol || targetSymbol,
+              side: td.side || data.decision.action,
+              quantity: td.quantity || data.decision.recommendedQuantity,
+              price: td.price || data.quote.price,
+              productType: 'MIS',
+              orderType: 'MARKET',
+              realizedPnL: td.realizedPnL,
+              executedBy: td.executedBy || `AI Agent: ${activeAgent.name}`,
+              reason: td.reason || data.decision.reasoning,
+            });
+          }
+
+          toast.success(`⚡ [Autonomous Agent Executed on Your Behalf]: ${data.decision.action} ${targetSymbol}`, {
             description: data.brokerNote,
           });
 
@@ -455,28 +488,21 @@ Strictly return your final decision as a JSON object.`
             },
             ...prev,
           ]);
-
-          // Refresh balance
-          fetch('/api/portfolio')
-            .then((r) => r.json())
-            .then((d) => {
-              if (d?.portfolio?.balance) setPortfolioBalance(d.portfolio.balance);
-            });
         } else if (data.decision.action === 'BUY') {
           confetti({
             particleCount: 40,
             spread: 60,
             origin: { y: 0.6 },
           });
-          toast.success(`🚀 ${activeAgent.name} signals BUY for ${evalSymbol}!`, {
+          toast.success(`🚀 ${activeAgent.name} signals BUY for ${targetSymbol}!`, {
             description: `Confidence: ${data.decision.confidence}% | Target: ₹${data.decision.targetPrice}`,
           });
         } else if (data.decision.action === 'SELL') {
-          toast.warning(`⚠️ ${activeAgent.name} signals SELL for ${evalSymbol}`, {
+          toast.warning(`⚠️ ${activeAgent.name} signals SELL for ${targetSymbol}`, {
             description: `Stop Loss: ₹${data.decision.stopLoss} | ${data.decision.reasoning.slice(0, 80)}...`,
           });
         } else {
-          toast.info(`⏸️ ${activeAgent.name} recommends HOLD for ${evalSymbol}`, {
+          toast.info(`⏸️ ${activeAgent.name} recommends HOLD for ${targetSymbol}`, {
             description: data.decision.reasoning.slice(0, 100),
           });
         }
@@ -495,27 +521,49 @@ Strictly return your final decision as a JSON object.`
     }
   };
 
+  const AUTO_PILOT_SYMBOLS = [
+    'RELIANCE.NS',
+    'TCS.NS',
+    'INFY.NS',
+    'HDFCBANK.NS',
+    'ICICIBANK.NS',
+    'TATAMOTORS.NS',
+    'SBIN.NS',
+  ];
+
   const startAgentRunner = () => {
     setIsRunnerActive(true);
     setRunnerCycle(1);
-    setCountdown(20);
-    toast.success('AI Agent Started!', {
-      description: `Autonomous loop monitoring ${evalSymbol} every 20 seconds.`,
+    setCountdown(15);
+    toast.success('AI Autonomous Broker Activated!', {
+      description: `Continuously scanning positions and watchlist symbols to buy and sell on your behalf every 15s.`,
     });
 
+    let cycleIndex = 0;
     // Execute first evaluation immediately
-    handleRunAgentEvaluation();
+    handleRunAgentEvaluation(evalSymbol);
 
-    // Start 20s interval
+    // Multi-asset intelligent auto-pilot interval
     runnerTimerRef.current = setInterval(() => {
+      cycleIndex++;
       setRunnerCycle((prev) => prev + 1);
-      setCountdown(20);
-      handleRunAgentEvaluation();
-    }, 20000);
+      setCountdown(15);
+
+      // Prioritize checking existing positions for profit/loss exit triggers, then watchlist
+      let nextSym = evalSymbol;
+      if (realtimePositions.length > 0 && cycleIndex % 2 === 1) {
+        const pos = realtimePositions[Math.floor(cycleIndex / 2) % realtimePositions.length];
+        nextSym = pos.symbol;
+      } else {
+        nextSym = AUTO_PILOT_SYMBOLS[cycleIndex % AUTO_PILOT_SYMBOLS.length];
+      }
+      setEvalSymbol(nextSym);
+      handleRunAgentEvaluation(nextSym);
+    }, 15000);
 
     // 1-second countdown display
     countdownTimerRef.current = setInterval(() => {
-      setCountdown((prev) => (prev > 1 ? prev - 1 : 20));
+      setCountdown((prev) => (prev > 1 ? prev - 1 : 15));
     }, 1000);
   };
 
@@ -523,8 +571,8 @@ Strictly return your final decision as a JSON object.`
     setIsRunnerActive(false);
     if (runnerTimerRef.current) clearInterval(runnerTimerRef.current);
     if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
-    toast.info('AI Agent Stopped', {
-      description: 'Autonomous trading loop has been paused.',
+    toast.info('Autonomous Broker Paused', {
+      description: 'AI agent will no longer execute trades on your behalf.',
     });
   };
 
@@ -584,42 +632,32 @@ Strictly return your final decision as a JSON object.`
 
     setExecutingOrder(true);
     try {
-      const res = await fetch('/api/trade/order', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          symbol: evalSymbol,
-          quantity: decision.recommendedQuantity || 1,
-          orderSide: decision.action,
-          orderType: 'MARKET',
-          productType: 'MIS',
-          targetPrice: decision.targetPrice,
-          stopLoss: decision.stopLoss,
-        }),
+      const holding = realtimePositions.find((p) => p.symbol === evalSymbol);
+      const isSell = decision.action === 'SELL';
+      const execPrice = decisionQuote?.price || 2980;
+      const realizedPnL = isSell && holding ? (execPrice - holding.avgPrice) * (decision.recommendedQuantity || 1) : undefined;
+
+      await executeClientTrade({
+        symbol: evalSymbol,
+        side: decision.action,
+        quantity: decision.recommendedQuantity || 1,
+        price: execPrice,
+        productType: 'MIS',
+        orderType: 'MARKET',
+        realizedPnL,
+        executedBy: `AI Agent: ${activeAgent.name}`,
+        reason: decision.reasoning,
       });
 
-      const data = await res.json();
-      if (res.ok && (data.success || data.order)) {
-        soundManager.playOrderSuccess();
-        confetti({
-          particleCount: 75,
-          spread: 80,
-          origin: { y: 0.5 },
-        });
-        toast.success(`Order Filled: ${decision.action} ${decision.recommendedQuantity} ${evalSymbol}!`, {
-          description: `Executed by AI Agent ${activeAgent.name} at Market LTP.`,
-        });
-
-        // Refresh balance
-        fetch('/api/portfolio')
-          .then((r) => r.json())
-          .then((d) => {
-            if (d?.portfolio?.balance) setPortfolioBalance(d.portfolio.balance);
-          });
-      } else {
-        soundManager.playOrderCancel();
-        toast.error('Order Execution Failed', { description: data.error || 'Trade rejected' });
-      }
+      soundManager.playOrderSuccess();
+      confetti({
+        particleCount: 75,
+        spread: 80,
+        origin: { y: 0.5 },
+      });
+      toast.success(`Order Executed on Your Behalf: ${decision.action} ${decision.recommendedQuantity} ${evalSymbol}!`, {
+        description: `Filled by AI Agent ${activeAgent.name} @ ₹${execPrice.toFixed(2)}${realizedPnL !== undefined ? ` (${realizedPnL >= 0 ? '+' : ''}₹${realizedPnL.toFixed(2)} P&L)` : ''}`,
+      });
     } catch (err: any) {
       soundManager.playOrderCancel();
       toast.error('Trade Execution Error', { description: err.message });
@@ -1088,7 +1126,7 @@ Strictly return your final decision as a JSON object.`
                 {/* Big Action Buttons: START AI AGENT (RUN NOW) & START CONTINUOUS RUNNER */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   <button
-                    onClick={handleRunAgentEvaluation}
+                    onClick={() => handleRunAgentEvaluation()}
                     disabled={evaluating}
                     className="w-full py-4 text-slate-950 font-black font-mono text-xs uppercase tracking-wider rounded-xl shadow-xl shadow-emerald-500/25 active:scale-95 transition-all flex items-center justify-center gap-2 bg-gradient-to-r from-emerald-400 via-teal-400 to-emerald-500 hover:from-emerald-300 hover:to-teal-300 disabled:opacity-60"
                   >

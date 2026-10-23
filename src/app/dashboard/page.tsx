@@ -24,6 +24,7 @@ import {
   LineChart,
   Activity,
   RefreshCw,
+  Bot,
 } from 'lucide-react';
 
 interface PortfolioSummary {
@@ -312,6 +313,40 @@ export default function Dashboard() {
               </span>
               <span className="text-slate-400">Overall return</span>
             </div>
+          </div>
+        </div>
+
+        {/* AI Agent Auto-Pilot Card */}
+        <div className="mb-8 p-5 bg-gradient-to-r from-purple-950/40 via-slate-900/80 to-blue-950/40 border border-purple-500/30 rounded-2xl shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-start gap-4">
+            <div className="p-3 bg-purple-500/20 border border-purple-500/30 rounded-xl text-purple-400">
+              <Bot className="w-6 h-6 animate-pulse" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-[10px] font-mono font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                  AUTONOMOUS EXECUTION ENGINE
+                </span>
+                <span className="flex items-center gap-1 text-[11px] text-emerald-400 font-medium">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                  Live Trading On Your Behalf
+                </span>
+              </div>
+              <h3 className="text-base font-bold text-white">AI Quantitative Agents & Whole-Market Auto-Pilot</h3>
+              <p className="text-xs text-slate-400 max-w-2xl mt-0.5">
+                Delegate trade execution to high-conviction AI agents (Quant Alpha, Momentum Scalper, Deep Value) or sweep 20+ stocks concurrently with customizable RSI/EMA rules, automatic profit booking (+2.5%), and stop-loss cutting (-1.2%).
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <Link
+              href="/agents"
+              className="px-4 py-2.5 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-purple-600/20 flex items-center gap-2 transition-all whitespace-nowrap"
+            >
+              <Zap className="w-4 h-4" />
+              <span>Launch AI Trading Desk</span>
+              <ChevronRight className="w-4 h-4" />
+            </Link>
           </div>
         </div>
 

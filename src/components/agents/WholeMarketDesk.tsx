@@ -177,6 +177,7 @@ export function WholeMarketDesk({
     userOrders: rtdbOrders,
     liveTrades: rtdbLiveTrades,
     isConnected: rtdbConnected,
+    executeClientTrade,
   } = useRealtimeTrading();
   const [feedTab, setFeedTab] = useState<'AGENT_LOGS' | 'FIREBASE_RTDB'>('AGENT_LOGS');
 
@@ -476,40 +477,19 @@ export function WholeMarketDesk({
           confetti({ particleCount: 50, spread: 70, origin: { y: 0.6 } });
           setExecutionLogs((prev) => [...data.executions, ...prev].slice(0, 40));
 
-          // Mirror directly to Cloud Firestore so onSnapshot stream reflects immediately
-          if (db) {
-            const now = new Date().toISOString();
-            for (const item of data.executions) {
-              const docId = `ord_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-              setDoc(doc(db, 'orders', docId), {
-                id: docId,
-                userId: 'demo-user-123',
-                stockSymbol: item.symbol,
-                type: item.action,
-                quantity: item.quantity,
-                price: item.price,
-                executedPrice: item.price,
-                status: 'EXECUTED',
-                productType: productType,
-                realizedPnL: item.realizedPnL,
-                createdAt: now,
-                executedAt: now,
-              }).catch(console.warn);
-
-              const portId = `demo-user-123_${item.symbol}`;
-              setDoc(doc(db, 'portfolios', portId), {
-                id: portId,
-                userId: 'demo-user-123',
-                stockSymbol: item.symbol,
-                quantity: item.action === 'SHORT' ? -item.quantity : item.quantity,
-                avgPrice: item.price,
-                currentPrice: item.price,
-                positionType: item.action === 'SHORT' ? 'SHORT' : 'LONG',
-                productType: productType,
-                createdAt: now,
-                updatedAt: now,
-              }).catch(console.warn);
-            }
+          // Persist trades directly to Cloud Firestore on behalf of the user
+          for (const item of data.executions) {
+            await executeClientTrade({
+              symbol: item.symbol,
+              side: item.action as any,
+              quantity: item.quantity,
+              price: item.price,
+              productType: productType,
+              orderType: 'MARKET',
+              realizedPnL: item.realizedPnL,
+              executedBy: 'AI Agent: Whole-Market Desk',
+              reason: item.reason || 'Quantitative universe confluence trigger',
+            });
           }
 
           toast.success(`Autonomous Quant Execution`, {

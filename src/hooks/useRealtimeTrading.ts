@@ -9,6 +9,8 @@ import {
   where,
   onSnapshot,
   setDoc,
+  deleteDoc,
+  getDoc,
   limit,
 } from 'firebase/firestore';
 
@@ -21,6 +23,8 @@ export interface RealtimeTradeEvent {
   status?: string;
   productType?: string;
   realizedPnL?: number;
+  executedBy?: string;
+  reason?: string;
   timestamp: string;
 }
 
@@ -157,6 +161,8 @@ export function useRealtimeTrading(customUserId?: string) {
               status: item.status || 'FILLED',
               productType: item.productType || 'MIS',
               realizedPnL: item.realizedPnL,
+              executedBy: item.executedBy,
+              reason: item.reason,
               timestamp: item.executedAt || item.createdAt || new Date().toISOString(),
             };
           });
@@ -189,6 +195,8 @@ export function useRealtimeTrading(customUserId?: string) {
               price: item.price || 0,
               productType: item.productType || 'MIS',
               realizedPnL: item.realizedPnL,
+              executedBy: item.executedBy,
+              reason: item.reason,
               timestamp: item.createdAt || new Date().toISOString(),
             };
           });
@@ -337,6 +345,8 @@ export function useRealtimeTrading(customUserId?: string) {
     productType?: string;
     orderType?: string;
     realizedPnL?: number;
+    executedBy?: string;
+    reason?: string;
   }) => {
     if (!db) return;
     const now = new Date().toISOString();
@@ -358,6 +368,8 @@ export function useRealtimeTrading(customUserId?: string) {
         executedPrice: trade.price,
         status: 'EXECUTED',
         realizedPnL: trade.realizedPnL !== undefined ? trade.realizedPnL : null,
+        executedBy: trade.executedBy || 'Manual Trader',
+        reason: trade.reason || 'Direct execution',
         createdAt: now,
         executedAt: now,
       });
@@ -373,6 +385,8 @@ export function useRealtimeTrading(customUserId?: string) {
         productType: trade.productType || 'MIS',
         orderType: trade.orderType || 'MARKET',
         realizedPnL: trade.realizedPnL !== undefined ? trade.realizedPnL : null,
+        executedBy: trade.executedBy || 'Manual Trader',
+        reason: trade.reason || 'Direct execution',
         createdAt: now,
       });
 
@@ -381,23 +395,64 @@ export function useRealtimeTrading(customUserId?: string) {
       const isExit = trade.side === 'SELL' || trade.side === 'COVER';
 
       if (!isExit) {
+        let newQty = isShort ? -trade.quantity : trade.quantity;
+        let newAvgPrice = trade.price;
+
+        try {
+          const portSnap = await getDoc(doc(db, 'portfolios', portId));
+          if (portSnap.exists()) {
+            const prev = portSnap.data();
+            const prevQty = Number(prev.quantity) || 0;
+            const prevPrice = Number(prev.avgPrice) || trade.price;
+            if (prevQty > 0 && !isShort) {
+              newQty = prevQty + trade.quantity;
+              newAvgPrice = (prevPrice * prevQty + trade.price * trade.quantity) / newQty;
+            } else if (prevQty < 0 && isShort) {
+              newQty = prevQty - trade.quantity;
+              newAvgPrice = (prevPrice * Math.abs(prevQty) + trade.price * trade.quantity) / Math.abs(newQty);
+            }
+          }
+        } catch {
+          // Use default newQty and newAvgPrice
+        }
+
         await setDoc(doc(db, 'portfolios', portId), {
           id: portId,
           userId,
           stockSymbol: trade.symbol,
-          quantity: isShort ? -trade.quantity : trade.quantity,
-          avgPrice: trade.price,
+          quantity: newQty,
+          avgPrice: newAvgPrice,
           currentPrice: trade.price,
           positionType: isShort ? 'SHORT' : 'LONG',
           productType: trade.productType || 'MIS',
           createdAt: now,
           updatedAt: now,
         }, { merge: true });
+      } else {
+        // Exit: SELL or COVER
+        try {
+          const portSnap = await getDoc(doc(db, 'portfolios', portId));
+          if (portSnap.exists()) {
+            const prev = portSnap.data();
+            const prevAbs = Math.abs(Number(prev.quantity) || 0);
+            if (prevAbs <= trade.quantity) {
+              await deleteDoc(doc(db, 'portfolios', portId));
+            } else {
+              const remainingQty = prev.quantity > 0 ? (prev.quantity - trade.quantity) : (prev.quantity + trade.quantity);
+              await setDoc(doc(db, 'portfolios', portId), {
+                quantity: remainingQty,
+                updatedAt: now,
+              }, { merge: true });
+            }
+          }
+        } catch (e) {
+          console.warn('Portfolio exit sync note:', e);
+        }
       }
 
       // 4. Update balance
       const cost = trade.price * trade.quantity;
-      const balanceDelta = trade.side === 'BUY' ? -cost : trade.side === 'SELL' ? cost : 0;
+      const balanceDelta = (trade.side === 'BUY' || trade.side === 'COVER') ? -cost : (trade.side === 'SELL' || trade.side === 'SHORT') ? cost : 0;
       if (balanceDelta !== 0) {
         const newBal = Math.max(0, balance + balanceDelta);
         await setDoc(doc(db, 'users', userId), {

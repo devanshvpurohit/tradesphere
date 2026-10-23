@@ -14,6 +14,7 @@ import {
   Flame,
   ArrowUpRight,
   ArrowDownRight,
+  Bot,
 } from 'lucide-react';
 import { useRealtimeTrading } from '@/hooks/useRealtimeTrading';
 import { toast } from 'sonner';
@@ -28,6 +29,8 @@ interface Transaction {
   productType: string;
   orderType: string;
   realizedPnL?: number | null;
+  executedBy?: string | null;
+  reason?: string | null;
   createdAt: string;
 }
 
@@ -93,6 +96,8 @@ export default function TransactionsPage() {
           productType: t.productType || 'MIS',
           orderType: 'MARKET',
           realizedPnL: t.realizedPnL,
+          executedBy: t.executedBy,
+          reason: t.reason,
           createdAt: t.timestamp,
         }));
 
@@ -301,6 +306,14 @@ export default function TransactionsPage() {
                           >
                             {t.stockSymbol}
                           </Link>
+                          {t.executedBy && t.executedBy.includes('AI') && (
+                            <div className="mt-0.5">
+                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30 font-sans font-medium inline-flex items-center gap-1">
+                                <Bot className="w-2.5 h-2.5 text-purple-400" />
+                                {t.executedBy}
+                              </span>
+                            </div>
+                          )}
                         </td>
                         <td className="py-3.5 text-slate-400">{t.productType}</td>
                         <td className="py-3.5 text-right font-bold text-white">{t.quantity}</td>
