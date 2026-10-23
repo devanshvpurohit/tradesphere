@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useSession } from '@/components/AuthContext';
+import { useRealtimeTrading } from '@/hooks/useRealtimeTrading';
 import { toast } from 'sonner';
 import confetti from 'canvas-confetti';
 import { soundManager } from '@/lib/sound';
@@ -43,6 +44,7 @@ export default function TradingModal({
   onOrderSuccess,
 }: TradingModalProps) {
   const { data: session } = useSession();
+  const { executeClientTrade } = useRealtimeTrading();
 
   const [orderSide, setOrderSide] = useState<OrderSide>(initialSide);
   const [productType, setProductType] = useState<ProductType>('MIS');
@@ -188,6 +190,17 @@ export default function TradingModal({
         });
 
         if (data.balance !== undefined) setBalance(data.balance);
+
+        // Mirror trade directly to Cloud Firestore so onSnapshot reflects immediately
+        executeClientTrade({
+          symbol: stockSymbol,
+          side: orderSide,
+          quantity,
+          price: data.order?.executedPrice || executionPrice,
+          productType,
+          orderType,
+        }).catch(console.warn);
+
         if (onOrderSuccess) onOrderSuccess();
         setTimeout(() => {
           onClose();

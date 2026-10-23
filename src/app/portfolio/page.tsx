@@ -295,7 +295,7 @@ export default function Portfolio() {
               Total Unrealized P&L
             </span>
             <div className={`text-2xl font-black font-mono mb-1 ${isProfitable ? 'text-emerald-400' : 'text-rose-400'}`}>
-              {isProfitable ? '+' : ''}₹{Math.abs(totalProfitLoss).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+              {isProfitable ? '+' : '-'}₹{Math.abs(totalProfitLoss).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
             </div>
             <div className="flex items-center gap-1.5 text-xs font-semibold">
               <span className={`px-1.5 py-0.5 rounded ${isProfitable ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>
@@ -440,9 +440,9 @@ export default function Portfolio() {
                             ₹{item.investedValue.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
                           </td>
                           <td className={`py-3.5 text-right font-bold ${isItemUp ? 'text-emerald-400' : 'text-rose-400'}`}>
-                            {isItemUp ? '+' : ''}₹{item.profitLoss.toFixed(2)}
+                            {isItemUp ? '+' : '-'}₹{Math.abs(item.profitLoss).toFixed(2)}
                             <span className="block text-[10px] font-normal">
-                              ({isItemUp ? '+' : ''}{item.profitLossPercent.toFixed(2)}%)
+                              ({isItemUp ? '+' : '-'}{Math.abs(item.profitLossPercent).toFixed(2)}%)
                             </span>
                           </td>
                           <td className="py-3.5 text-right pr-2">
